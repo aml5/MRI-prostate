@@ -95,7 +95,7 @@ class volume:
     #     self._weightpath = weightpath
     #     self._data = utils.LoadFile(self._filename,normalize='CLAHE')
 
-    def saveVolume(self, outputtype, filetype='h5'):
+    def saveVolume(self, data, outputtype, filetype='h5'):
         dir = 'MRI_DataPreparation/output/' + self._patient
         filename = self._volname + '-' + outputtype
         if os.path.exists(dir):
@@ -155,7 +155,7 @@ class volume:
         self._attr["origin"]  = self._orig[0].ImagePosition
         self._data = np.array([self._orig[i].pixel_array for i in range(len(fileset))])
 
-        self.saveVolume('original', 'mhd')
+        self.saveVolume(self._data, 'original', 'mhd')
 
     def compile_mhd(self, filename):
         img = sitk.ReadImage(filename)
@@ -163,7 +163,7 @@ class volume:
         self._spacing = img.GetSpacing()
         self._origin  = img.GetOrigin()
         self._orig = self._data.copy()
-        volume.saveVolume(self._data,self._volname,'original', self._patient, 'h5')
+        volume.saveVolume(self._data, 'original', 'h5')
 
     def compile_folder(self, folderpath):
         files = [os.path.join(folderpath, x) for x in os.listdir(folderpath) if
@@ -171,7 +171,7 @@ class volume:
         self._data = sorted([pydicom.read_file(x) for x in files], key=lambda x: x.InstanceNumber)
         self._data = np.array([self._data[i].pixel_array for i in range(len(files))])
         self._orig = self._data.copy()
-        volume.saveVolume(self._data, self._volname, 'original', self._patient, 'h5')
+        volume.saveVolume(self._data, 'original', 'h5')
 
     def preprocess(self, normalize='CLAHE', verbose=False, apply_curve_smoothing=False):
         # Normalize
@@ -221,7 +221,7 @@ class volume:
         ct_scan[ct_scan < 0] = 0.
 
         self._data = ct_scan
-        self.saveVolume('preprocessed', 'mhd')
+        self.saveVolume(self._data, 'preprocessed', 'mhd')
 
     def imgstats(self):
         print(self._patient)
@@ -281,7 +281,7 @@ class volume:
         results = prelim[0]
         print(results.shape)
         mask = utils.smooth_contours(utils.smooth_contours(results, type='CV2'))
-        volume.saveVolume(mask, self._volname, 'mask', self._patient)
+        volume.saveVolume(mask, 'mask', 'mhd')
         # utils.multi_slice_viewer_legacy(mask.reshape(configuration.standard_volume),
         #                                 self._data.reshape(configuration.standard_volume))
         # plt.show()
@@ -334,10 +334,10 @@ class volume:
         clipped = self._orig[self._clip[4]: self._clip[5], self._clip[0]:self._clip[1], self._clip[2]:self._clip[3]]
         if clipped.size:
             print('Saving to .h5 file.')
-            volume.saveVolume(clipped, self._volname, 'output', self._patient, 'h5')
+            volume.saveVolume(clipped, 'output', 'h5')
         else:
             print('No output file.')
-            volume.saveVolume(clipped, self._volname, 'output', self._patient, 'txt')
+            volume.saveVolume(clipped, 'output', 'txt')
         # sitkimg = sitk.GetImageFromArray(self._data)
         # sitk.WriteImage(sitkimg, 'data.mhd')
 
