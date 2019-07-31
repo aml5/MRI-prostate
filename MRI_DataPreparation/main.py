@@ -46,11 +46,13 @@ class patient:
     def __init__(self, patientID, jsonpath):
         self._patientID = patientID
         self._jsonpath = jsonpath
-        self.run()
-
-    def run(self):
         self.readJSON()
         self.createData()
+
+    def run(self):
+        for volume in self._volumes:
+            volume.preprocess()
+            volume.imgstats()
 
     def readJSON(self):
         path = self._jsonpath
@@ -59,7 +61,7 @@ class patient:
         # wrapper, filename + (data -> AccessionID, Folder, FileList)
 
     def createData(self):
-        self._data = np.array([])
+        self._volumes = np.array([])
         path = 'MRI_DataPreparation/MRI_cases_test'
         tgzpath = os.path.join(path, os.path.basename(self._jsondata["filename"]))
         print('Entering tgz directory: ' + tgzpath)
@@ -68,16 +70,14 @@ class patient:
                 for i, fileset in enumerate(self._jsondata["data"]["FileList"]):
                     if (self._jsondata['data']['ImageType'][i] == 'PRIMARY_OTHER'):
                         tmp = volume(os.path.splitext(os.path.basename(tgzpath))[0] + '-' + self._jsondata['data']['ImageType'][i], os.path.splitext(os.path.basename(tgzpath))[0])
-                        # try:
                         tmp.compile(fileset, f)
-                        tmp.run()
+                        self._volumes = np.append(self._volumes, tmp)
                         # except NotImplementedError:
                         #     print('Skipping compressed image, directory: ' + self._jsondata["data"]["Folder"][i])
                     else:
                         print('No PRIMARY_OTHER type images. Datatype: ' + self._jsondata['data']['ImageType'][i])
                     # tmp = volume.getVolume(tmp)
                     # tmp.run()
-            # self._data = np.append(self._data, tmp)
 
     def outputData(self):
         pass
@@ -95,12 +95,9 @@ class volume:
     #     self._weightpath = weightpath
     #     self._data = utils.LoadFile(self._filename,normalize='CLAHE')
 
-    @classmethod
-    def saveVolume(cls, data, volname, outputtype, patient='', filetype='h5', spacing=(1,1,1), origin=(0,0,0)):
-        if patient == '':
-            patient = volname
-        dir = 'MRI_DataPreparation/output/' + patient
-        filename = volname + '-' + outputtype
+    def saveVolume(self, outputtype, filetype='h5'):
+        dir = 'MRI_DataPreparation/output/' + self._patient
+        filename = self._volname + '-' + outputtype
         if os.path.exists(dir):
             pass
         else:
@@ -111,18 +108,18 @@ class volume:
             h5f.create_dataset('dataset', data=data)
             h5f.close()
             print('Volume saved. \n ----------')
-            volume.saveVolume(data, volname, outputtype, patient, 'mhd')
         if filetype=='mhd':
             print('Saving to ' + dir + '/' + filename + '.mhd...')
             sitkimg = sitk.GetImageFromArray(data)
-            sitkimg.SetSpacing(spacing)
-            sitkimg.SetOrigin(origin)
+            sitkimg.SetSpacing(self._attr["spacing"])
+            sitkimg.SetOrigin(self._attr["origin"])
             sitk.WriteImage(sitkimg, dir + '/' + filename + '.mhd')
             print('Volume saved. \n ----------')
         if filetype=='txt':
             text = open(dir + '/' + filename + '.txt', 'w')
             text.write('Image is empty.')
             text.close()
+
     @classmethod
     def saveVolumemhd(cls, data, volname, outputtype, spacing=(1,1,1), origin=(0,0,0)):
         print('Saving to output/' + volname + '-' + outputtype + '.mhd...')
@@ -148,24 +145,17 @@ class volume:
 
     def compile(self, fileset, f):
         print('Compiling images...')
-        self._data = []
-        # fileset.sort()
+        self._orig = []
+        self._attr = {}
         for x in fileset:
             f.extract(x, path='temp-unzip')
-            self._data.append(pydicom.dcmread(os.path.join('temp-unzip', x)))
-        self._data.sort(key=lambda x: x.InstanceNumber)
-        # self._data = sorted(self._data, key=lambda x: x.InstanceNumber)
-        # shutil.rmtree('temp-unzip')
-        self._spacing = (*self._data[0].PixelSpacing, self._data[0].SpacingBetweenSlices)
-        self._origin  = self._data[0].ImagePosition
-        # self._data = sorted([pydicom.read_file(f.extract(x)) for x in fileset], key=lambda x: x.InstanceNumber)
-        self._data = np.array([self._data[i].pixel_array for i in range(len(fileset))])
-    # self._data = np.array([])
-    # for i in range(len(fileset)):
-    #     print(test[i].SeriesInstanceUID, test[i].SOPInstanceUID)
-    #     self._data = np.append(self._data, test[i].pixel_array)
-        self._orig = self._data.copy()
-        volume.saveVolume(self._data, self._volname, 'original', self._patient, 'h5')
+            self._orig.append(pydicom.dcmread(os.path.join('temp-unzip', x)))
+        self._orig.sort(key=lambda x: x.InstanceNumber)
+        self._attr["spacing"] = (*self._orig[0].PixelSpacing, self._orig[0].SpacingBetweenSlices)
+        self._attr["origin"]  = self._orig[0].ImagePosition
+        self._data = np.array([self._orig[i].pixel_array for i in range(len(fileset))])
+
+        self.saveVolume('original', 'mhd')
 
     def compile_mhd(self, filename):
         img = sitk.ReadImage(filename)
@@ -202,17 +192,13 @@ class volume:
         # Sharpen
         # ct_scan = utils.Sharp3DVolume(ct_scan, type_of_sharpness=configuration.type_of_sharpness)
         ct_scan *= 0.9
-        if (ct_scan.shape[1] > 384):
-            new_orig = int((ct_scan.shape[1] - configuration.standard_volume[1])/2)
-            new_coord = (new_orig, new_orig+384, new_orig, new_orig+384)
-            ct_scan = ct_scan[:, new_coord[0]: new_coord[1], new_coord[2]: new_coord[3]]
+        ct_scan = self.resize(ct_scan)
         img = sitk.GetImageFromArray(ct_scan)
 
         if verbose:
             print('img', img.GetDimension(), img.GetDirection(), img.GetOrigin(), img.GetSpacing())
 
         # Resize Standard
-
         new_x_size = configuration.standard_volume[1]
         new_y_size = configuration.standard_volume[2]
         new_z_size = configuration.standard_volume[0]
@@ -235,8 +221,21 @@ class volume:
         ct_scan[ct_scan < 0] = 0.
 
         self._data = ct_scan
-        volume.saveVolume(self._data, self._volname, 'preprocessed', self._patient)
-        self.load()
+        self.saveVolume('preprocessed', 'mhd')
+
+    def imgstats(self):
+        print(self._patient)
+        print(np.mean(self._data))
+        print(np.median(self._data))
+        print(np.std(self._data))
+        print('-------------')
+
+    def resize(self, ct_scan):
+        if (ct_scan.shape[1] > 384):
+            new_orig = int((ct_scan.shape[1] - configuration.standard_volume[1])/2)
+            new_coord = (new_orig, new_orig+384, new_orig, new_orig+384)
+            ct_scan = ct_scan[:, new_coord[0]: new_coord[1], new_coord[2]: new_coord[3]]
+        return ct_scan
 
     def load(self):
         self._data = self._data.reshape(1, *self._data.shape)
@@ -272,8 +271,9 @@ class volume:
         self._model.load_weights(self._weightpath)
 
     def predict(self):
+        self.load()
         print('Running prediction...')
-        self._clip = [384, 0, 384, 0, 0, 100]
+        self._clip = [384, 0, 384, 0, 0, 300]
         mask = np.array(configuration.standard_volume)
         predict_set = np.vstack((self._data, self._zeros))  # np.load(self._filename)
         predict_set = predict_set.reshape(*predict_set.shape, 1)
@@ -349,4 +349,5 @@ if __name__ == '__main__':
     with open(path, 'r') as f:
         for i in range(len(json.load(f))):
             data = patient(i, path)
+            data.run()
     print('Script complete. Exiting program now.')
