@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.gridspec as gridspec
 import cv2
 import sys, os
+import shutil
 sys.path.insert(0, 'MRI_Prostate_Segmentation')
 from os.path import isfile, join
 from os import listdir
@@ -67,11 +68,13 @@ class patient:
                 for i, fileset in enumerate(self._jsondata["data"]["FileList"]):
                     if (self._jsondata['data']['ImageType'][i] == 'PRIMARY_OTHER'):
                         tmp = volume(os.path.splitext(os.path.basename(tgzpath))[0] + '-' + self._jsondata['data']['ImageType'][i], os.path.splitext(os.path.basename(tgzpath))[0])
-                        try:
-                            tmp.compile(fileset, f)
-                            tmp.run()
-                        except Exception:
-                            print('Skipping compressed image, directory: ' + self._jsondata["data"]["Folder"][i])
+                        # try:
+                        tmp.compile(fileset, f)
+                        tmp.run()
+                        # except NotImplementedError:
+                        #     print('Skipping compressed image, directory: ' + self._jsondata["data"]["Folder"][i])
+                    else:
+                        print('No PRIMARY_OTHER type images. Datatype: ' + self._jsondata['data']['ImageType'][i])
                     # tmp = volume.getVolume(tmp)
                     # tmp.run()
             # self._data = np.append(self._data, tmp)
@@ -93,7 +96,7 @@ class volume:
     #     self._data = utils.LoadFile(self._filename,normalize='CLAHE')
 
     @classmethod
-    def saveVolume(cls, data, volname, outputtype, patient='', filetype='h5'):
+    def saveVolume(cls, data, volname, outputtype, patient='', filetype='h5', spacing=(1,1,1), origin=(0,0,0)):
         if patient == '':
             patient = volname
         dir = 'MRI_DataPreparation/output/' + patient
@@ -112,17 +115,24 @@ class volume:
         if filetype=='mhd':
             print('Saving to ' + dir + '/' + filename + '.mhd...')
             sitkimg = sitk.GetImageFromArray(data)
+            sitkimg.SetSpacing(spacing)
+            sitkimg.SetOrigin(origin)
             sitk.WriteImage(sitkimg, dir + '/' + filename + '.mhd')
             print('Volume saved. \n ----------')
-
+        if filetype=='txt':
+            text = open(dir + '/' + filename + '.txt', 'w')
+            text.write('Image is empty.')
+            text.close()
     @classmethod
-    def saveVolumemhd(cls, data, volname, outputtype):
+    def saveVolumemhd(cls, data, volname, outputtype, spacing=(1,1,1), origin=(0,0,0)):
         print('Saving to output/' + volname + '-' + outputtype + '.mhd...')
         if os.path.exists('output'):
             pass
         else:
             os.mkdir('output')
         sitkimg = sitk.GetImageFromArray(data)
+        sitkimg.SetSpacing(spacing)
+        sitkimg.SetOrigin(origin)
         sitk.WriteImage(sitkimg, 'output/' + volname + '-' + outputtype + '.mhd')
         print('Volume saved. \n ----------')
 
@@ -138,7 +148,17 @@ class volume:
 
     def compile(self, fileset, f):
         print('Compiling images...')
-        self._data = sorted([pydicom.read_file(f.extractfile(x)) for x in fileset], key=lambda x: x.InstanceNumber)
+        self._data = []
+        # fileset.sort()
+        for x in fileset:
+            f.extract(x, path='temp-unzip')
+            self._data.append(pydicom.dcmread(os.path.join('temp-unzip', x)))
+        self._data.sort(key=lambda x: x.InstanceNumber)
+        # self._data = sorted(self._data, key=lambda x: x.InstanceNumber)
+        # shutil.rmtree('temp-unzip')
+        self._spacing = (*self._data[0].PixelSpacing, self._data[0].SpacingBetweenSlices)
+        self._origin  = self._data[0].ImagePosition
+        # self._data = sorted([pydicom.read_file(f.extract(x)) for x in fileset], key=lambda x: x.InstanceNumber)
         self._data = np.array([self._data[i].pixel_array for i in range(len(fileset))])
     # self._data = np.array([])
     # for i in range(len(fileset)):
@@ -150,6 +170,8 @@ class volume:
     def compile_mhd(self, filename):
         img = sitk.ReadImage(filename)
         self._data = sitk.GetArrayFromImage(img)
+        self._spacing = img.GetSpacing()
+        self._origin  = img.GetOrigin()
         self._orig = self._data.copy()
         volume.saveVolume(self._data,self._volname,'original', self._patient, 'h5')
 
@@ -180,6 +202,10 @@ class volume:
         # Sharpen
         # ct_scan = utils.Sharp3DVolume(ct_scan, type_of_sharpness=configuration.type_of_sharpness)
         ct_scan *= 0.9
+        if (ct_scan.shape[1] > 384):
+            new_orig = int((ct_scan.shape[1] - configuration.standard_volume[1])/2)
+            new_coord = (new_orig, new_orig+384, new_orig, new_orig+384)
+            ct_scan = ct_scan[:, new_coord[0]: new_coord[1], new_coord[2]: new_coord[3]]
         img = sitk.GetImageFromArray(ct_scan)
 
         if verbose:
@@ -306,8 +332,12 @@ class volume:
         self._clip[5] *= dim_orig[0] / configuration.standard_volume[0]
         self._clip = [int(i) for i in self._clip]
         clipped = self._orig[self._clip[4]: self._clip[5], self._clip[0]:self._clip[1], self._clip[2]:self._clip[3]]
-        print('Saving to .h5 file.')
-        volume.saveVolume(clipped, self._volname, 'output', self._patient, 'h5')
+        if clipped.size:
+            print('Saving to .h5 file.')
+            volume.saveVolume(clipped, self._volname, 'output', self._patient, 'h5')
+        else:
+            print('No output file.')
+            volume.saveVolume(clipped, self._volname, 'output', self._patient, 'txt')
         # sitkimg = sitk.GetImageFromArray(self._data)
         # sitk.WriteImage(sitkimg, 'data.mhd')
 
@@ -315,7 +345,7 @@ class volume:
         pass
 
 if __name__ == '__main__':
-    path = 'MRI_DataPreparation/data/StudyCohort_prostate_mri.json'
+    path = 'MRI_DataPreparation/data/StudyCohort_cut.json'
     with open(path, 'r') as f:
         for i in range(len(json.load(f))):
             data = patient(i, path)
