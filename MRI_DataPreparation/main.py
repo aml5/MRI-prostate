@@ -231,7 +231,8 @@ class volume:
         if np.mean(ct_scan) > 0.47:
         # print(f'{self._patient}: mean: {np.mean(ct_scan)}, median: {np.median(ct_scan):.5f}, std: {np.std(ct_scan):.5f}')
             med_training = 0.5091
-            ct_scan *= med_training / np.median(ct_scan)
+            # ct_scan *= med_training / np.median(ct_scan)
+            ct_scan *+ 1.15
         # print(f'{self._patient}: mean: {np.mean(ct_scan)}, median: {np.median(ct_scan):.5f}, std: {np.std(ct_scan):.5f}')
         ct_scan[ct_scan > 1] = 1.
         ct_scan[ct_scan < 0] = 0.
@@ -359,13 +360,13 @@ class volume:
         pass
 
 if __name__ == '__main__':
-    # path = 'MRI_DataPreparation/data/StudyCohort_cut.json'
-    # with open(path, 'r') as f:
-    #     for i in range(len(json.load(f))):
-    #         data = patient(i, path, True)
-    #         data.run()
-    # print('Script complete. Exiting program now.')
-    data = volume('test2', '', True)
-    data.compile_mhd(r'MRI_Prostate_Segmentation/train/Case03.mhd')
-    data.preprocess()
-    data.run()
+    path = 'MRI_DataPreparation/data/StudyCohort_cut.json'
+    with open(path, 'r') as f:
+        for i in range(len(json.load(f))):
+            data = patient(i, path, True)
+            data.run()
+    print('Script complete. Exiting program now.')
+    # data = volume('test2', '', True)
+    # data.compile_mhd(r'MRI_Prostate_Segmentation/train/Case03.mhd')
+    # data.preprocess()
+    # data.run()
