@@ -235,10 +235,7 @@ def train(args, model, verbose=False):
             train_img_dataset[i] = utils.Sharp3DVolume(train_img_dataset[i],verbose=False,type_of_sharpness=None)
     train_img_dataset = train_img_dataset.reshape(40, 24, 384, 384, 1)
     for volume in train_img_dataset:
-        print(np.mean(volume))
-        print(np.median(volume))
-        print(np.std(volume))
-        print('----------')
+        print(f'mean: {np.mean(volume):.5f}, median:{np.median(volume):.5f}, std: {np.std(volume):.5f}')
 
     model.fit_generator(generator=utils.DataGeneratorWithAugmentation(X=train_img_dataset,Y=train_mask_dataset,batch_size=batch_size, 
                         RunNormalize=configuration.hyperparameters[configuration.select_model]['RunNormalize'],

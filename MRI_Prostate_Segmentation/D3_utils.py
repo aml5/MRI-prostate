@@ -121,7 +121,7 @@ def smooth_images(imgs, t_step=0.125, n_iter=5):
 
 
 def multi_slice_viewer_legacy(volume, img, depth=1):
-    # volume is the prediction, reference is the expert segmentation, img is the MRI input
+    # volume is the prediction, img is the MRI input
     remove_keymap_conflicts({'j', 'k', 'left', 'right'})
     img_mask = np.zeros((volume.shape[0], volume.shape[1], volume.shape[2], 3))
 
