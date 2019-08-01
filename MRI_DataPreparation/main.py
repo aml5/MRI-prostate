@@ -51,8 +51,7 @@ class patient:
 
     def run(self):
         for volume in self._volumes:
-            volume.preprocess()
-            volume.imgstats()
+            volume.run()
 
     def readJSON(self):
         path = self._jsonpath
