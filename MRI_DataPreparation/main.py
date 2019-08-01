@@ -71,7 +71,10 @@ class patient:
                     if (self._jsondata['data']['ImageType'][i] == 'PRIMARY_OTHER'):
                         tmp = volume(os.path.splitext(os.path.basename(tgzpath))[0] + '-' + self._jsondata['data']['ImageType'][i], os.path.splitext(os.path.basename(tgzpath))[0])
                         tmp.compile(fileset, f)
-                        self._volumes = np.append(self._volumes, tmp)
+                        if tmp.stats() > 0.42:
+                            self._volumes = np.append(self._volumes, tmp)
+                        else:
+                            print(f'Non-T2 image removed. mean: {tmp.stats():.4f}')
                         # except NotImplementedError:
                         #     print('Skipping compressed image, directory: ' + self._jsondata["data"]["Folder"][i])
                     else:
@@ -191,7 +194,8 @@ class volume:
         ct_scan = ct_scan / np.max(ct_scan) # does not change result because max and min are 1.0 and 0.0 respectively
         # Sharpen
         # ct_scan = utils.Sharp3DVolume(ct_scan, type_of_sharpness=configuration.type_of_sharpness)
-        ct_scan *= 0.9
+        med_training = 0.5901
+        ct_scan *= np.median(ct_scan) / med_training
         ct_scan = self.resize(ct_scan)
         img = sitk.GetImageFromArray(ct_scan)
 
