@@ -280,26 +280,26 @@ def ApplyAugmentation(d3_img, type_of_augmentation=None, dict_parameter=None, se
         dict_parameter={'rotation_xy':[-10,10],
                         'rotation_zx' :[-10,10],
                         'rotation_zy' :[-10,10],
-                        'zooming':[1.01,1.1],
+                        'zooming':[1.0,1.1],
                         'down_scale':[0.85,0.99]
                         }
     if type_of_augmentation is None:
         seq=['None',
-            'rotation_xy',
+            # 'rotation_xy',
             #'rotation_zx',
-            'rotation_zy',
-            #'zooming',
-            'h_flip',
+            # 'rotation_zy',
+            # 'zooming',
+            # 'h_flip',
             #'elastic'
-            'v_flip',
+            # 'v_flip',
             'z_flip'
-            'rotate_90_k1',
-            'h_flip',
+            # 'rotate_90_k1',
+            # 'h_flip',
             #'v_flip',
             #'z_flip',
-            'rotate_90_k1',
-            'rotate_90_k2',
-            'rotate_90_k3'
+            # 'rotate_90_k1',
+            # 'rotate_90_k2',
+            # 'rotate_90_k3'
             ]
         type_of_augmentation = random.choice(seq)
 

@@ -15,6 +15,7 @@ class slices:
 
     def __init__(self, parentpath, patient, volname, filetype):
         self._patient = patient
+        if volname == 'same': volname = f'{patient}-PRIMARY_OTHER'
         self._imgpath = f'{parentpath}/{patient}/{volname}-preprocessed.{filetype}'
         self._maskpath = f'{parentpath}/{patient}/{volname}-mask.{filetype}'
 

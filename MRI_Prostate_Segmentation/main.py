@@ -55,7 +55,7 @@ def Run(args):
     
     #Check if the folder exists for the result and weight storage
     timestr = time.strftime("%Y%m%d-%H%M")
-    to_store_result = './results/result_' + (configuration.select_model) + "_" + (timestr)
+    to_store_result = 'MRI_Prostate_Segmentation/results/result_' + (configuration.select_model) + "_" + (timestr)
     configuration.hyperparameters[configuration.select_model]['to_save'] = to_store_result
 
     if os.path.exists(to_store_result):
@@ -234,10 +234,10 @@ def train(args, model, verbose=False):
         for i in range(train_img_dataset.shape[0]):
             train_img_dataset[i] = utils.Sharp3DVolume(train_img_dataset[i],verbose=False,type_of_sharpness=None)
     train_img_dataset = train_img_dataset.reshape(40, 24, 384, 384, 1)
-    for volume in train_img_dataset:
-        print(f'mean: {np.mean(volume):.5f}, median:{np.median(volume):.5f}, std: {np.std(volume):.5f}')
+    # for volume in train_img_dataset:
+    #     print(f'mean: {np.mean(volume):.5f}, median:{np.median(volume):.5f}, std: {np.std(volume):.5f}')
 
-    model.fit_generator(generator=utils.DataGeneratorWithAugmentation(X=train_img_dataset,Y=train_mask_dataset,batch_size=batch_size, 
+    model.fit_generator(generator=utils.DataGeneratorWithAugmentation(X=train_img_dataset,Y=train_mask_dataset,batch_size=batch_size,
                         RunNormalize=configuration.hyperparameters[configuration.select_model]['RunNormalize'],
                         RunAugmentation=configuration.hyperparameters[configuration.select_model]['RunAugmentation'],HED=configuration.HED),
                         steps_per_epoch=train_steps_per_epoch,

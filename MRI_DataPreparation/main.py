@@ -43,9 +43,10 @@ set_session(tf.Session(config=config))
 
 class patient:
 
-    def __init__(self, patientID, jsonpath, verbose=False):
+    def __init__(self, patientID, jsonpath, datapath=None, verbose=False):
         self._patientID = patientID
         self._jsonpath = jsonpath
+        self._datapath = datapath if datapath is not None else 'MRI_DataPreparation/data/tgz'
         self._verbose = verbose
         self.readJSON()
         self.createData()
@@ -55,6 +56,7 @@ class patient:
             # volume.preprocess()
             # volume.imgstats()
             volume.run()
+            # volume.stats_hist()
 
     def readJSON(self):
         path = self._jsonpath
@@ -64,8 +66,7 @@ class patient:
 
     def createData(self):
         self._volumes = np.array([])
-        path = 'MRI_DataPreparation/MRI_cases_test'
-        tgzpath = os.path.join(path, os.path.basename(self._jsondata["filename"]))
+        tgzpath = os.path.join(self._datapath, os.path.basename(self._jsondata["filename"]))
         if self._verbose: print('Entering tgz directory: ' + tgzpath)
         if os.path.exists(tgzpath):
             with tarfile.open(tgzpath) as f:
@@ -74,11 +75,10 @@ class patient:
                         if self._verbose: print('PRIMARY_OTHER type images found.')
                         tmp = volume(os.path.splitext(os.path.basename(tgzpath))[0] + '-' + self._jsondata['data']['ImageType'][i], os.path.splitext(os.path.basename(tgzpath))[0], verbose=self._verbose)
                         tmp.compile(fileset, f)
-                        tmp.preprocess()
-                        if tmp.imgstats() > 0.47:
-                            self._volumes = np.append(self._volumes, tmp)
-                        else:
-                            if self._verbose: print(f'Non-T2 image removed.')
+                        # if tmp.imgstats() > 0.47:
+                        self._volumes = np.append(self._volumes, tmp)
+                        # else:
+                        #     if self._verbose: print(f'Non-T2 image removed.')
                         # except NotImplementedError:
                         #     print('Skipping compressed image, directory: ' + self._jsondata["data"]["Folder"][i])
                     else:
@@ -91,7 +91,7 @@ class patient:
 
 class volume:
 
-    def __init__(self, volname, patient='', verbose=False, weightpath=r"C:/Users/Andrew Lu/Documents/Projects/MRI_Prostate_Segmentation/results/result_Prostate_D3_Segmentation_20190705-1805/weights-32.h5"):
+    def __init__(self, volname, patient='', verbose=False, weightpath=r"C:\Users\Andrew Lu\Documents\Projects\MRI_Prostate_Segmentation\results\result_Prostate_D3_Segmentation_20190705-1805\weights-32.h5"):
         self._weightpath = weightpath
         self._volname = volname
         self._verbose = verbose
@@ -146,7 +146,7 @@ class volume:
         return patient._data
 
     def run(self):
-        # self.preprocess()
+        self.preprocess()
         self.modelConfig()
         self.predict()
         self.output()
@@ -158,7 +158,7 @@ class volume:
         for x in fileset:
             f.extract(x, path='temp-unzip')
             self._orig.append(pydicom.dcmread(os.path.join('temp-unzip', x)))
-        self._orig.sort(key=lambda x: x.InstanceNumber)
+        self._orig.sort(key=lambda x: x.InstanceNumber, reverse=True)
         self._attr["spacing"] = (*self._orig[0].PixelSpacing, self._orig[0].SpacingBetweenSlices)
         self._attr["origin"]  = self._orig[0].ImagePositionPatient
         self._orig = np.array([self._orig[i].pixel_array for i in range(len(fileset))])
@@ -172,18 +172,19 @@ class volume:
         self._attr["spacing"] = img.GetSpacing()
         self._attr["origin"]  = img.GetOrigin()
         self._data = self._orig.copy()
-        self.saveVolume(self._data, 'original', 'h5')
+        self.saveVolume(self._data, 'original', 'mhd')
 
     def compile_folder(self, folderpath):
         files = [os.path.join(folderpath, x) for x in os.listdir(folderpath) if
                  x.endswith('.dcm')]
         self._orig = sorted([pydicom.read_file(x) for x in files], key=lambda x: x.InstanceNumber)
         self._data = np.array([self._orig[i].pixel_array for i in range(len(files))])
-        self.saveVolume(self._data, 'original', 'h5')
+        self.saveVolume(self._data, 'original', 'mhd')
 
     def preprocess(self, normalize='CLAHE', verbose=False, apply_curve_smoothing=False):
         # Normalize
         ct_scan = self._data
+        # ct_scan = self.resize(ct_scan)
         if normalize=='CLAHE':
             ct_scan = utils.D3_equalize_adapthist(ct_scan, clip_limit=configuration.clip_limit, nbins=configuration.nbins)
         elif normalize == 'ZSCORE':
@@ -201,7 +202,6 @@ class volume:
         # print(f'{self._patient}: mean: {np.mean(ct_scan):.5f}, median: {np.median(ct_scan):.5f}, std: {np.std(ct_scan):.5f}')
         ct_scan = utils.Sharp3DVolume(ct_scan, type_of_sharpness=configuration.type_of_sharpness)
         # print(f'{self._patient}: mean: {np.mean(ct_scan):.5f}, median: {np.median(ct_scan):.5f}, std: {np.std(ct_scan):.5f}')
-        ct_scan = self.resize(ct_scan)
         # print(f'{self._patient}: mean: {np.mean(ct_scan):.5f}, median: {np.median(ct_scan):.5f}, std: {np.std(ct_scan):.5f}')
         img = sitk.GetImageFromArray(ct_scan)
 
@@ -228,11 +228,11 @@ class volume:
 
         ct_scan = sitk.GetArrayFromImage(new_img)
 
-        if np.mean(ct_scan) > 0.47:
-        # print(f'{self._patient}: mean: {np.mean(ct_scan)}, median: {np.median(ct_scan):.5f}, std: {np.std(ct_scan):.5f}')
-            med_training = 0.5091
-            # ct_scan *= med_training / np.median(ct_scan)
-            ct_scan *+ 1.15
+        # if np.mean(ct_scan) > 0.47:
+        # # print(f'{self._patient}: mean: {np.mean(ct_scan)}, median: {np.median(ct_scan):.5f}, std: {np.std(ct_scan):.5f}')
+        #     med_training = 0.5091
+        #     # ct_scan *= med_training / np.median(ct_scan)
+        #     ct_scan *+ 1.15
         # print(f'{self._patient}: mean: {np.mean(ct_scan)}, median: {np.median(ct_scan):.5f}, std: {np.std(ct_scan):.5f}')
         ct_scan[ct_scan > 1] = 1.
         ct_scan[ct_scan < 0] = 0.
@@ -244,6 +244,13 @@ class volume:
     def imgstats(self):
         if self._verbose: print(f'{self._patient}: mean: {np.mean(self._data):.5f}, median: {np.median(self._data):.5f}, std: {np.std(self._data):.5f}')
         return np.mean(self._data)
+
+    def stats_hist(self):
+        plt.subplot(131), plt.hist(self._data.flatten()/1000, range=(0,1)), plt.ylim(0,2000000), plt.title('Original')
+        plt.subplot(132), plt.hist(self.resize(self._data).flatten()/1000, range=(0,1)), plt.ylim(0,2000000), plt.title('Cropped')
+        self.preprocess()
+        plt.subplot(133), plt.hist(self._data.flatten()), plt.ylim(0,2000000), plt.title('Preprocessed')
+        plt.show()
 
     def resize(self, ct_scan):
         if (ct_scan.shape[1] > 384):
@@ -348,8 +355,8 @@ class volume:
         self._clip = [int(i) for i in self._clip]
         clipped = clipped[self._clip[4]: self._clip[5], self._clip[0]:self._clip[1], self._clip[2]:self._clip[3]]
         if clipped.size:
-            if self._verbose: print('Saving to .h5 file.')
-            self.saveVolume(clipped, 'output', 'h5')
+            if self._verbose: print('Saving to .mhd file.')
+            self.saveVolume(clipped, 'output', 'mhd')
         else:
             if self._verbose: print('No output file.')
             self.saveVolume(clipped, 'output', 'txt')
@@ -360,13 +367,14 @@ class volume:
         pass
 
 if __name__ == '__main__':
-    path = 'MRI_DataPreparation/data/StudyCohort_cut.json'
+    path = 'MRI_DataPreparation/data/StudyCohort_prostate_mri.json'
     with open(path, 'r') as f:
         for i in range(len(json.load(f))):
-            data = patient(i, path, True)
+            data = patient(i, path, verbose=True)
             data.run()
     print('Script complete. Exiting program now.')
-    # data = volume('test2', '', True)
-    # data.compile_mhd(r'MRI_Prostate_Segmentation/train/Case03.mhd')
+    # data = volume('case12', '', True)
+    # data.compile_mhd(r'MRI_Prostate_Segmentation/train/Case12.mhd')
     # data.preprocess()
+    # # data.stats_hist()
     # data.run()

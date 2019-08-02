@@ -34,10 +34,10 @@ train_valid_ratio=0.8
 Onlive=False #False
 nbins=1000
 test_mode=True
-img_data_train ='./img_train_set.npy'
-mask_data_train = './mask_train_set.npy'
-img_data_valid ='./img_valid_set.npy'
-mask_data_valid = './mask_valid_set.npy'
+img_data_train ='MRI_Prostate_Segmentation/img_train_set.npy'
+mask_data_train = 'MRI_Prostate_Segmentation/mask_train_set.npy'
+img_data_valid ='MRI_Prostate_Segmentation/img_valid_set.npy'
+mask_data_valid = 'MRI_Prostate_Segmentation/mask_valid_set.npy'
 #%%
 
 #%%
@@ -96,12 +96,12 @@ hyperparameters =   {'Prostate_D3_Segmentation':
                         'n_filter' : 16,
                         'AdditionalCallbacks' : [], #clr_00
                         'RunNormalize': False,
-                        'train_sample_size' : 2,
-                        'valid_sample_size' : 1,
+                        'train_sample_size' : 10,
+                        'valid_sample_size' : 2,
                         'clip_region': None,
                         'input_shape': (24,384,384,1),
-                        'batch_size' : 1,
-                        'RunAugmentation' : False,
+                        'batch_size' : 2,
+                        'RunAugmentation' : True,
                         'loss' : losses, #loss_functions.cross_entropy_balanced, # loss_functions.dice_coef_loss, #'binary_crossentropy', #
                         'metrics' :metrics_lst,# [loss_functions.ofuse_pixel_error,metrics.dic_coef_v2],#, metrics.dic_coef_v2, metrics.jaccard_distance], # metrics.auc_roc
                         'activation_last' : 'sigmoid'
