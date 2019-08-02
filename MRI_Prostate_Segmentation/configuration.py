@@ -92,15 +92,15 @@ hyperparameters =   {'Prostate_D3_Segmentation':
                         'CheckPoint' : './result_D3_Model_Segmentation/weights-{epoch:02d}.h5',
                         'monitor' : 'val_output_dic_coef_v2',
                         'mode' : 'max',
-                        'epochs' : 1,
+                        'epochs' : 50,
                         'n_filter' : 16,
                         'AdditionalCallbacks' : [], #clr_00
                         'RunNormalize': False,
-                        'train_sample_size' : 10,
-                        'valid_sample_size' : 2,
+                        'train_sample_size' : 3200,
+                        'valid_sample_size' : 10,
                         'clip_region': None,
                         'input_shape': (24,384,384,1),
-                        'batch_size' : 2,
+                        'batch_size' : 4,
                         'RunAugmentation' : True,
                         'loss' : losses, #loss_functions.cross_entropy_balanced, # loss_functions.dice_coef_loss, #'binary_crossentropy', #
                         'metrics' :metrics_lst,# [loss_functions.ofuse_pixel_error,metrics.dic_coef_v2],#, metrics.dic_coef_v2, metrics.jaccard_distance], # metrics.auc_roc
