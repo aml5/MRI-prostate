@@ -46,7 +46,7 @@ class patient:
     def __init__(self, patientID, jsonpath, datapath=None, verbose=False):
         self._patientID = patientID
         self._jsonpath = jsonpath
-        self._datapath = datapath if datapath is not None else 'MRI_DataPreparation/data/tgz'
+        self._datapath = datapath if datapath is not None else 'MRI_DataPreparation/MRI_cases_test'
         self._verbose = verbose
         self.readJSON()
         self.createData()
@@ -113,7 +113,9 @@ class volume:
         if filetype=='h5':
             if self._verbose: print('Saving to ' + dir + '/' + filename + '.h5...')
             h5f = h5py.File(dir + '/' + filename + '.h5', 'w')
-            h5f.create_dataset('dataset', data=data)
+            data = h5f.create_dataset('dataset', data=data)
+            data.attrs.create('spacing', self._attr['spacing'])
+            data.attrs.create('origin', self._attr['origin'])
             h5f.close()
             if self._verbose: print('Volume saved. \n ----------')
         if filetype=='mhd':
@@ -128,22 +130,18 @@ class volume:
             text.write('Image is empty.')
             text.close()
 
-    @classmethod
-    def saveVolumemhd(cls, data, volname, outputtype, spacing=(1,1,1), origin=(0,0,0)):
-        print('Saving to output/' + volname + '-' + outputtype + '.mhd...')
-        if os.path.exists('output'):
-            pass
-        else:
-            os.mkdir('output')
-        sitkimg = sitk.GetImageFromArray(data)
-        sitkimg.SetSpacing(spacing)
-        sitkimg.SetOrigin(origin)
-        sitk.WriteImage(sitkimg, 'output/' + volname + '-' + outputtype + '.mhd')
-        print('Volume saved. \n ----------')
-
-    @classmethod
-    def getVolume(cls, patient):
-        return patient._data
+    # @classmethod
+    # def saveVolumemhd(cls, data, volname, outputtype, spacing=(1,1,1), origin=(0,0,0)):
+    #     print('Saving to output/' + volname + '-' + outputtype + '.mhd...')
+    #     if os.path.exists('output'):
+    #         pass
+    #     else:
+    #         os.mkdir('output')
+    #     sitkimg = sitk.GetImageFromArray(data)
+    #     sitkimg.SetSpacing(spacing)
+    #     sitkimg.SetOrigin(origin)
+    #     sitk.WriteImage(sitkimg, 'output/' + volname + '-' + outputtype + '.mhd')
+    #     print('Volume saved. \n ----------')
 
     def run(self):
         self.preprocess()
@@ -158,11 +156,12 @@ class volume:
         for x in fileset:
             f.extract(x, path='temp-unzip')
             self._orig.append(pydicom.dcmread(os.path.join('temp-unzip', x)))
-        self._orig.sort(key=lambda x: x.InstanceNumber, reverse=True)
+        self._orig.sort(key=lambda x: x.ImagePositionPatient[2])
         self._attr["spacing"] = (*self._orig[0].PixelSpacing, self._orig[0].SpacingBetweenSlices)
         self._attr["origin"]  = self._orig[0].ImagePositionPatient
         self._orig = np.array([self._orig[i].pixel_array for i in range(len(fileset))])
         self._data = self._orig.copy()
+        self.saveVolume(self._data, 'original', 'h5')
         self.saveVolume(self._data, 'original', 'mhd')
 
     def compile_mhd(self, filename):
@@ -172,13 +171,15 @@ class volume:
         self._attr["spacing"] = img.GetSpacing()
         self._attr["origin"]  = img.GetOrigin()
         self._data = self._orig.copy()
+        self.saveVolume(self._data, 'original', 'h5')
         self.saveVolume(self._data, 'original', 'mhd')
 
     def compile_folder(self, folderpath):
         files = [os.path.join(folderpath, x) for x in os.listdir(folderpath) if
                  x.endswith('.dcm')]
-        self._orig = sorted([pydicom.read_file(x) for x in files], key=lambda x: x.InstanceNumber)
+        self._orig = sorted([pydicom.read_file(x) for x in files], key=lambda x: x.ImagePositionPatient[2])
         self._data = np.array([self._orig[i].pixel_array for i in range(len(files))])
+        self.saveVolume(self._data, 'original', 'h5')
         self.saveVolume(self._data, 'original', 'mhd')
 
     def preprocess(self, normalize='CLAHE', verbose=False, apply_curve_smoothing=False):
@@ -204,6 +205,7 @@ class volume:
         # print(f'{self._patient}: mean: {np.mean(ct_scan):.5f}, median: {np.median(ct_scan):.5f}, std: {np.std(ct_scan):.5f}')
         # print(f'{self._patient}: mean: {np.mean(ct_scan):.5f}, median: {np.median(ct_scan):.5f}, std: {np.std(ct_scan):.5f}')
         img = sitk.GetImageFromArray(ct_scan)
+        self.getAttributes(img)
 
         if verbose:
             print('img', img.GetDimension(), img.GetDirection(), img.GetOrigin(), img.GetSpacing())
@@ -226,6 +228,7 @@ class volume:
             ct_scan = utils.smooth_images(ct_scan)
             print('apply_curve_smoothing')
 
+        self.setAttributes(new_img)
         ct_scan = sitk.GetArrayFromImage(new_img)
 
         # if np.mean(ct_scan) > 0.47:
@@ -239,7 +242,16 @@ class volume:
         # print(f'{self._patient}: mean: {np.mean(ct_scan):.5f}, median: {np.median(ct_scan):.5f}, std: {np.std(ct_scan):.5f}')
 
         self._data = ct_scan
+        self.saveVolume(self._data, 'preprocessed', 'h5')
         self.saveVolume(self._data, 'preprocessed', 'mhd')
+
+    def setAttributes(self, img):
+        self._attr['spacing'] = img.GetSpacing()
+        self._attr['origin'] = img.GetOrigin()
+
+    def getAttributes(self, img):
+        img.SetSpacing(self._attr['spacing'])
+        img.SetOrigin(self._attr['origin'])
 
     def imgstats(self):
         if self._verbose: print(f'{self._patient}: mean: {np.mean(self._data):.5f}, median: {np.median(self._data):.5f}, std: {np.std(self._data):.5f}')
@@ -302,6 +314,7 @@ class volume:
         results = prelim[0]
         if self._verbose: print(results.shape)
         mask = utils.smooth_contours(utils.smooth_contours(results, type='CV2'))
+        self.saveVolume(mask, 'mask', 'h5')
         self.saveVolume(mask, 'mask', 'mhd')
         # utils.multi_slice_viewer_legacy(mask.reshape(configuration.standard_volume),
         #                                 self._data.reshape(configuration.standard_volume))
@@ -346,16 +359,30 @@ class volume:
         self._data = self._data.reshape(configuration.standard_volume)
         clipped = self._orig.copy()
         dim_orig = clipped.shape
+        comp_factor = 0.1
+        x_len = self._clip[1] - self._clip[0]
+        y_len = self._clip[3] - self._clip[2]
+        z_len = self._clip[5] - self._clip[4]
+        x_adj = np.ceil(x_len * comp_factor)
+        y_adj = np.ceil(y_len * comp_factor)
+        z_adj = np.ceil(z_len * comp_factor)
         self._clip[0] *= dim_orig[1] / configuration.standard_volume[1]
+        self._clip[0] -= x_adj
         self._clip[1] *= dim_orig[1] / configuration.standard_volume[1]
+        self._clip[1] += x_adj
         self._clip[2] *= dim_orig[2] / configuration.standard_volume[2]
+        self._clip[2] -= y_adj
         self._clip[3] *= dim_orig[2] / configuration.standard_volume[2]
+        self._clip[3] += y_adj
         self._clip[4] *= dim_orig[0] / configuration.standard_volume[0]
+        self._clip[4] -= z_adj
         self._clip[5] *= dim_orig[0] / configuration.standard_volume[0]
+        self._clip[5] += z_adj
         self._clip = [int(i) for i in self._clip]
         clipped = clipped[self._clip[4]: self._clip[5], self._clip[0]:self._clip[1], self._clip[2]:self._clip[3]]
         if clipped.size:
-            if self._verbose: print('Saving to .mhd file.')
+            if self._verbose: print('Saving to .h5 file.')
+            self.saveVolume(clipped, 'output', 'h5')
             self.saveVolume(clipped, 'output', 'mhd')
         else:
             if self._verbose: print('No output file.')
@@ -367,7 +394,7 @@ class volume:
         pass
 
 if __name__ == '__main__':
-    path = 'MRI_DataPreparation/data/StudyCohort_prostate_mri.json'
+    path = 'MRI_DataPreparation/data/StudyCohort_cut.json'
     with open(path, 'r') as f:
         for i in range(len(json.load(f))):
             data = patient(i, path, verbose=True)
