@@ -41,12 +41,26 @@ config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 set_session(tf.Session(config=config))
 
+class dataset:
+
+    def __init__(self,
+                 jsonpath='MRI_DataPreparation/data/StudyCohort_cut.json',
+                 datapath='MRI_DataPreparation/MRI_cases_test'):
+        self._datapath = datapath
+        self._jsonpath = jsonpath
+
+    def run(self):
+        with open(self._jsonpath, 'r') as f:
+            for i in range(len(json.load(f))):
+                data = patient(i, self._jsonpath, self._jsonpath, stepoutput=False, verbose=True)
+                vol, attrs = data.run()
+
 class patient:
 
-    def __init__(self, patientID, jsonpath, datapath=None, verbose=False):
+    def __init__(self, patientID, jsonpath, datapath=None, stepoutput=False, verbose=False):
         self._patientID = patientID
         self._jsonpath = jsonpath
-        self._datapath = datapath if datapath is not None else 'MRI_DataPreparation/MRI_cases_test'
+        self._datapath = datapath
         self._verbose = verbose
         self.readJSON()
         self.createData()
@@ -91,9 +105,10 @@ class patient:
 
 class volume:
 
-    def __init__(self, volname, patient='', verbose=False, weightpath=r"C:\Users\Andrew Lu\Documents\Projects\MRI_Prostate_Segmentation\results\result_Prostate_D3_Segmentation_20190705-1805\weights-32.h5"):
+    def __init__(self, volname, patient='', stepoutput=False, verbose=False, weightpath=r"C:\Users\Andrew Lu\Documents\Projects\MRI_Prostate_Segmentation\results\result_Prostate_D3_Segmentation_20190705-1805\weights-32.h5"):
         self._weightpath = weightpath
         self._volname = volname
+        self._stepoutput = stepoutput
         self._verbose = verbose
         self._patient = volname if patient == '' else patient
 
@@ -104,31 +119,32 @@ class volume:
     #     self._data = utils.LoadFile(self._filename,normalize='CLAHE')
 
     def saveVolume(self, data, outputtype, filetype='h5'):
-        dir = 'MRI_DataPreparation/output/' + self._patient
-        filename = self._volname + '-' + outputtype
-        if os.path.exists(dir):
-            pass
-        else:
-            os.mkdir(dir)
-        if filetype=='h5':
-            if self._verbose: print('Saving to ' + dir + '/' + filename + '.h5...')
-            h5f = h5py.File(dir + '/' + filename + '.h5', 'w')
-            data = h5f.create_dataset('dataset', data=data)
-            data.attrs.create('spacing', self._attr['spacing'])
-            data.attrs.create('origin', self._attr['origin'])
-            h5f.close()
-            if self._verbose: print('Volume saved. \n ----------')
-        if filetype=='mhd':
-            if self._verbose: print('Saving to ' + dir + '/' + filename + '.mhd...')
-            sitkimg = sitk.GetImageFromArray(data)
-            sitkimg.SetSpacing(self._attr["spacing"])
-            sitkimg.SetOrigin(self._attr["origin"])
-            sitk.WriteImage(sitkimg, dir + '/' + filename + '.mhd')
-            if self._verbose: print('Volume saved. \n ----------')
-        if filetype=='txt':
-            text = open(dir + '/' + filename + '.txt', 'w')
-            text.write('Image is empty.')
-            text.close()
+        if self._stepoutput:
+            dir = 'MRI_DataPreparation/output/' + self._patient
+            filename = self._volname + '-' + outputtype
+            if os.path.exists(dir):
+                pass
+            else:
+                os.mkdir(dir)
+            if filetype=='h5':
+                if self._verbose: print('Saving to ' + dir + '/' + filename + '.h5...')
+                h5f = h5py.File(dir + '/' + filename + '.h5', 'w')
+                data = h5f.create_dataset('dataset', data=data)
+                data.attrs.create('spacing', self._attr['spacing'])
+                data.attrs.create('origin', self._attr['origin'])
+                h5f.close()
+                if self._verbose: print('Volume saved. \n ----------')
+            if filetype=='mhd':
+                if self._verbose: print('Saving to ' + dir + '/' + filename + '.mhd...')
+                sitkimg = sitk.GetImageFromArray(data)
+                sitkimg.SetSpacing(self._attr["spacing"])
+                sitkimg.SetOrigin(self._attr["origin"])
+                sitk.WriteImage(sitkimg, dir + '/' + filename + '.mhd')
+                if self._verbose: print('Volume saved. \n ----------')
+            if filetype=='txt':
+                text = open(dir + '/' + filename + '.txt', 'w')
+                text.write('Image is empty.')
+                text.close()
 
     # @classmethod
     # def saveVolumemhd(cls, data, volname, outputtype, spacing=(1,1,1), origin=(0,0,0)):
@@ -389,16 +405,13 @@ class volume:
             self.saveVolume(clipped, 'output', 'txt')
         # sitkimg = sitk.GetImageFromArray(self._data)
         # sitk.WriteImage(sitkimg, 'data.mhd')
+        return clipped, self._attr
 
     def h5open(self):
         pass
 
 if __name__ == '__main__':
-    path = 'MRI_DataPreparation/data/StudyCohort_cut.json'
-    with open(path, 'r') as f:
-        for i in range(len(json.load(f))):
-            data = patient(i, path, verbose=True)
-            data.run()
+
     print('Script complete. Exiting program now.')
     # data = volume('case12', '', True)
     # data.compile_mhd(r'MRI_Prostate_Segmentation/train/Case12.mhd')
