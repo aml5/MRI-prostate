@@ -50,10 +50,32 @@ class dataset:
         self._jsonpath = jsonpath
 
     def run(self):
+        h5 = h5py.File('data.h5','w')
         with open(self._jsonpath, 'r') as f:
-            for i in range(len(json.load(f))):
+            json = json.load(f)
+            for i in range(len(json)):
                 data = patient(i, self._jsonpath, self._jsonpath, stepoutput=False, verbose=True)
                 vol, attrs = data.run()
+                dataset.outputData(h5, vol, attrs)
+        h5.close()
+
+    @classmethod
+    def outputData(cls, h5, vol, attrs):
+        group = h5.create_group(attrs['Patient Path'])
+        pixeldata = group.create_dataset(attrs['Patient'], vol)
+        pixeldata.attrs.create('Age', attrs['Age'])
+        pixeldata.attrs.create('Weight', attrs['Weight'])
+        pixeldata.attrs.create('BMI', attrs['BMI'])
+        pixeldata.attrs.create('Patient_Height', attrs['Patient Height'])
+        pixeldata.attrs.create('SeriesNr', attrs['SeriesNr'])
+        pixeldata.attrs.create('Size', attrs['Size'])
+        pixeldata.attrs.create('Origin', attrs['Origin'])
+        pixeldata.attrs.create('Spacing', attrs['Spacing'])
+        pixeldata.attrs.create('Direction', attrs['Direction'])
+        pixeldata.attrs.create('NumberOfComponentsPerPixel', attrs['NumberOfComponentsPerPixel'])
+        pixeldata.attrs.create('Width', attrs['Width'])
+        pixeldata.attrs.create('Height', attrs['Height'])
+        pixeldata.attrs.create('Depth', attrs['Depth'])
 
 class patient:
 
@@ -61,6 +83,7 @@ class patient:
         self._patientID = patientID
         self._jsonpath = jsonpath
         self._datapath = datapath
+        self._stepoutput = stepoutput
         self._verbose = verbose
         self.readJSON()
         self.createData()
@@ -99,9 +122,6 @@ class patient:
                         if self._verbose: print('No PRIMARY_OTHER type images. Datatype: ' + self._jsondata['data']['ImageType'][i])
                     # tmp = volume.getVolume(tmp)
                     # tmp.run()
-
-    def outputData(self):
-        pass
 
 class volume:
 
@@ -173,8 +193,22 @@ class volume:
             f.extract(x, path='temp-unzip')
             self._orig.append(pydicom.dcmread(os.path.join('temp-unzip', x)))
         self._orig.sort(key=lambda x: x.ImagePositionPatient[2])
-        self._attr["spacing"] = (*self._orig[0].PixelSpacing, self._orig[0].SpacingBetweenSlices)
-        self._attr["origin"]  = self._orig[0].ImagePositionPatient
+        self._attr['Spacing'] = (*self._orig[0].PixelSpacing, self._orig[0].SpacingBetweenSlices)
+        self._attr['Origin']  = self._orig[0].ImagePositionPatient
+        self._attr['Patient'] = self._patient
+        self._attr['Age'] = 50
+        self._attr['Weight'] = 150
+        self._attr['BMI'] = 20
+        self._attr['Patient_Height'] = 15
+        self._attr['SeriesNr'] = 15
+        self._attr['Size'] = 15
+        self._attr['Direction'] = 15
+        self._attr['NumberOfComponentsPerPixel'] = 15
+        self._attr['Width'] = 15
+        self._attr['Height'] = 15
+        self._attr['Depth'] = 15
+        self._attr['Patient Description'] = 'test'
+        self._attr['Patient Path'] = self._attr['Patient'] + '/' + self._attr['Patient Description']
         self._orig = np.array([self._orig[i].pixel_array for i in range(len(fileset))])
         self._data = self._orig.copy()
         self.saveVolume(self._data, 'original', 'h5')
@@ -184,8 +218,8 @@ class volume:
         img = sitk.ReadImage(filename)
         self._orig = sitk.GetArrayFromImage(img)
         self._attr = {}
-        self._attr["spacing"] = img.GetSpacing()
-        self._attr["origin"]  = img.GetOrigin()
+        self._attr['Spacing'] = img.GetSpacing()
+        self._attr['Origin']  = img.GetOrigin()
         self._data = self._orig.copy()
         self.saveVolume(self._data, 'original', 'h5')
         self.saveVolume(self._data, 'original', 'mhd')
@@ -262,12 +296,12 @@ class volume:
         self.saveVolume(self._data, 'preprocessed', 'mhd')
 
     def setAttributes(self, img):
-        self._attr['spacing'] = img.GetSpacing()
-        self._attr['origin'] = img.GetOrigin()
+        self._attr['Spacing'] = img.GetSpacing()
+        self._attr['Origin'] = img.GetOrigin()
 
     def getAttributes(self, img):
-        img.SetSpacing(self._attr['spacing'])
-        img.SetOrigin(self._attr['origin'])
+        img.SetSpacing(self._attr['Spacing'])
+        img.SetOrigin(self._attr['Origin'])
 
     def imgstats(self):
         if self._verbose: print(f'{self._patient}: mean: {np.mean(self._data):.5f}, median: {np.median(self._data):.5f}, std: {np.std(self._data):.5f}')
