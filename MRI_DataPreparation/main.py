@@ -45,16 +45,17 @@ class dataset:
 
     def __init__(self,
                  jsonpath='MRI_DataPreparation/data/StudyCohort_cut.json',
-                 datapath='MRI_DataPreparation/MRI_cases_test'):
+                 datapath='MRI_DataPreparation/'
+                          'MRI_cases_test'):
         self._datapath = datapath
         self._jsonpath = jsonpath
 
     def run(self):
         h5 = h5py.File('data.h5','w')
         with open(self._jsonpath, 'r') as f:
-            json = json.load(f)
-            for i in range(len(json)):
-                data = patient(i, self._jsonpath, self._jsonpath, stepoutput=False, verbose=True)
+            metafile = json.load(f)
+            for i in range(len(metafile)):
+                data = patient(i, self._jsonpath, self._datapath, stepoutput=False, verbose=True)
                 vol, attrs = data.run()
                 dataset.outputData(h5, vol, attrs)
         h5.close()
@@ -62,11 +63,11 @@ class dataset:
     @classmethod
     def outputData(cls, h5, vol, attrs):
         group = h5.create_group(attrs['Patient Path'])
-        pixeldata = group.create_dataset(attrs['Patient'], vol)
+        pixeldata = group.create_dataset(attrs['Patient'], data=vol)
         pixeldata.attrs.create('Age', attrs['Age'])
         pixeldata.attrs.create('Weight', attrs['Weight'])
         pixeldata.attrs.create('BMI', attrs['BMI'])
-        pixeldata.attrs.create('Patient_Height', attrs['Patient Height'])
+        pixeldata.attrs.create('Patient_Height', attrs['Patient_Height'])
         pixeldata.attrs.create('SeriesNr', attrs['SeriesNr'])
         pixeldata.attrs.create('Size', attrs['Size'])
         pixeldata.attrs.create('Origin', attrs['Origin'])
@@ -92,7 +93,7 @@ class patient:
         for volume in self._volumes:
             # volume.preprocess()
             # volume.imgstats()
-            volume.run()
+            return volume.run() # for now
             # volume.stats_hist()
 
     def readJSON(self):
@@ -183,7 +184,7 @@ class volume:
         self.preprocess()
         self.modelConfig()
         self.predict()
-        self.output()
+        return self.output()
 
     def compile(self, fileset, f):
         if self._verbose: print('Compiling images...')
@@ -405,29 +406,28 @@ class volume:
         return flattened
 
     def output(self):
-        import h5py
         self._data = self._data.reshape(configuration.standard_volume)
         clipped = self._orig.copy()
         dim_orig = clipped.shape
-        comp_factor = 0.1
+        comp_factor = 0.05
         x_len = self._clip[1] - self._clip[0]
         y_len = self._clip[3] - self._clip[2]
         z_len = self._clip[5] - self._clip[4]
         x_adj = np.ceil(x_len * comp_factor)
         y_adj = np.ceil(y_len * comp_factor)
-        z_adj = np.ceil(z_len * comp_factor)
-        self._clip[0] *= dim_orig[1] / configuration.standard_volume[1]
+        z_adj = 1 # np.ceil(z_len * comp_factor)
         self._clip[0] -= x_adj
-        self._clip[1] *= dim_orig[1] / configuration.standard_volume[1]
+        self._clip[0] *= dim_orig[1] / configuration.standard_volume[1]
         self._clip[1] += x_adj
-        self._clip[2] *= dim_orig[2] / configuration.standard_volume[2]
+        self._clip[1] *= dim_orig[1] / configuration.standard_volume[1]
         self._clip[2] -= y_adj
-        self._clip[3] *= dim_orig[2] / configuration.standard_volume[2]
+        self._clip[2] *= dim_orig[2] / configuration.standard_volume[2]
         self._clip[3] += y_adj
-        self._clip[4] *= dim_orig[0] / configuration.standard_volume[0]
+        self._clip[3] *= dim_orig[2] / configuration.standard_volume[2]
         self._clip[4] -= z_adj
-        self._clip[5] *= dim_orig[0] / configuration.standard_volume[0]
+        self._clip[4] *= dim_orig[0] / configuration.standard_volume[0]
         self._clip[5] += z_adj
+        self._clip[5] *= dim_orig[0] / configuration.standard_volume[0]
         self._clip = [int(i) for i in self._clip]
         clipped = clipped[self._clip[4]: self._clip[5], self._clip[0]:self._clip[1], self._clip[2]:self._clip[3]]
         if clipped.size:
