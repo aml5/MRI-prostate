@@ -111,7 +111,7 @@ class patient:
                     if (self._jsondata['data']['ImageType'][i] == 'PRIMARY_OTHER'):
                         if self._verbose: print('PRIMARY_OTHER type images found.')
                         tmp = volume(os.path.splitext(os.path.basename(tgzpath))[0] + '-' + self._jsondata['data']['ImageType'][i], os.path.splitext(os.path.basename(tgzpath))[0], verbose=self._verbose)
-                        tmp.compile(fileset, f)
+                        tmp.compile(fileset, self._jsondata['data']['Folder'][i], f)
                         # if tmp.imgstats() > 0.47:
                         self._volumes = np.append(self._volumes, tmp)
                         # else:
@@ -185,10 +185,11 @@ class volume:
         self.predict()
         return self.output()
 
-    def compile(self, fileset, f):
+    def compile(self, fileset, folderpath, f):
         if self._verbose: print('Compiling images...')
-        f.extractall(path='temp-unzip', members=fileset)
-        self._orig, reader = self.loadVolume('temp-unzip')
+        for x in fileset:
+            f.extractall(x, path='temp-unzip')
+        self._orig, reader = self.loadVolume(sys.path.join('temp-unzip', folderpath))
         size_array = self._orig.GetSize()
         origin_array = self._orig.GetOrigin()
         spacing_array = self._orig.GetSpacing()
@@ -460,7 +461,8 @@ class volume:
         pass
 
 if __name__ == '__main__':
-
+    data = dataset()
+    data.run()
     print('Script complete. Exiting program now.')
     # data = volume('case12', '', True)
     # data.compile_mhd(r'MRI_Prostate_Segmentation/train/Case12.mhd')
