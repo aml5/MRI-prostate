@@ -60,7 +60,8 @@ class dataset:
             for i in range(len(metafile)):
                 data = patient(i, self._jsonpath, self._datapath, stepoutput=False, verbose=True)
                 vol, attrs = data.run()
-                dataset.outputData(h5, vol, attrs)
+                if vol is not False:
+                    dataset.outputData(h5, vol, attrs)
         h5.close()
 
     @classmethod
@@ -98,6 +99,7 @@ class patient:
             # volume.imgstats()
             return volume.run() # for now
             # volume.stats_hist()
+        return False, False
 
     def readJSON(self):
         path = self._jsonpath
@@ -192,7 +194,7 @@ class volume:
     def compile(self, fileset, f):
         if self._verbose: print('Compiling images...')
         for x in fileset:
-            f.extracta(x, path='temp-unzip')
+            f.extract(x, path='temp-unzip')
         folderpath, _ = os.path.split(fileset[0])
         self._orig, reader = self.loadVolume(os.path.join('temp-unzip', folderpath))
         size_array = self._orig.GetSize()
@@ -218,8 +220,8 @@ class volume:
         self._attr['Width'] = width_array
         self._attr['Height'] = height_array
         self._attr['Depth'] = depth_array
-        self._attr['Patient Description'] = reader.GetMetaData(1, '0008|103E') if '0008|103E' in reader.GetMetaDataKeys(1) else -1
-        self._attr['Patient Path'] = self._attr['Patient'] + '/' + self._attr['Patient Description'] if '0008|103E' in reader.GetMetaDataKeys(1) else -1
+        self._attr['Patient Description'] = reader.GetMetaData(1, '0008|103e') if '0008|103e' in reader.GetMetaDataKeys(1) else 'No Description'
+        self._attr['Patient Path'] = self._attr['Patient'] + '/' + self._attr['Patient Description']
         self._data = sitk.GetArrayFromImage(self._orig)
         self.saveVolume(self._data, 'original', 'h5')
         self.saveVolume(self._data, 'original', 'mhd')
@@ -430,7 +432,7 @@ class volume:
         self._data = self._data.reshape(configuration.standard_volume)
         clipped = sitk.GetArrayFromImage(self._orig)
         dim_orig = clipped.shape
-        comp_factor = 0.05
+        comp_factor = 0.10
         x_len = self._clip[1] - self._clip[0]
         y_len = self._clip[3] - self._clip[2]
         z_len = self._clip[5] - self._clip[4]
