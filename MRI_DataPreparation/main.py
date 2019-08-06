@@ -154,15 +154,15 @@ class volume:
                 if self._verbose: print('Saving to ' + dir + '/' + filename + '.h5...')
                 h5f = h5py.File(dir + '/' + filename + '.h5', 'w')
                 data = h5f.create_dataset('dataset', data=data)
-                data.attrs.create('spacing', self._attr['spacing'])
-                data.attrs.create('origin', self._attr['origin'])
+                data.attrs.create('Spacing', self._attr['Spacing'])
+                data.attrs.create('Origin', self._attr['Origin'])
                 h5f.close()
                 if self._verbose: print('Volume saved. \n ----------')
             if filetype=='mhd':
                 if self._verbose: print('Saving to ' + dir + '/' + filename + '.mhd...')
                 sitkimg = sitk.GetImageFromArray(data)
-                sitkimg.SetSpacing(self._attr["spacing"])
-                sitkimg.SetOrigin(self._attr["origin"])
+                sitkimg.SetSpacing(self._attr["Spacing"])
+                sitkimg.SetOrigin(self._attr["Origin"])
                 sitk.WriteImage(sitkimg, dir + '/' + filename + '.mhd')
                 if self._verbose: print('Volume saved. \n ----------')
             if filetype=='txt':
@@ -171,15 +171,15 @@ class volume:
                 text.close()
 
     # @classmethod
-    # def saveVolumemhd(cls, data, volname, outputtype, spacing=(1,1,1), origin=(0,0,0)):
+    # def saveVolumemhd(cls, data, volname, outputtype, Spacing=(1,1,1), Origin=(0,0,0)):
     #     print('Saving to output/' + volname + '-' + outputtype + '.mhd...')
     #     if os.path.exists('output'):
     #         pass
     #     else:
     #         os.mkdir('output')
     #     sitkimg = sitk.GetImageFromArray(data)
-    #     sitkimg.SetSpacing(spacing)
-    #     sitkimg.SetOrigin(origin)
+    #     sitkimg.SetSpacing(Spacing)
+    #     sitkimg.SetOrigin(Origin)
     #     sitk.WriteImage(sitkimg, 'output/' + volname + '-' + outputtype + '.mhd')
     #     print('Volume saved. \n ----------')
 
@@ -192,12 +192,12 @@ class volume:
     def compile(self, fileset, f):
         if self._verbose: print('Compiling images...')
         for x in fileset:
-            f.extractall(x, path='temp-unzip')
+            f.extracta(x, path='temp-unzip')
         folderpath, _ = os.path.split(fileset[0])
         self._orig, reader = self.loadVolume(os.path.join('temp-unzip', folderpath))
         size_array = self._orig.GetSize()
-        origin_array = self._orig.GetOrigin()
-        spacing_array = self._orig.GetSpacing()
+        Origin_array = self._orig.GetOrigin()
+        Spacing_array = self._orig.GetSpacing()
         direction_array = self._orig.GetDirection()
         ComponentsPerPixel_array = self._orig.GetNumberOfComponentsPerPixel()
         width_array = self._orig.GetWidth()
@@ -211,8 +211,8 @@ class volume:
         self._attr['BMI'] = self._attr['Weight'] / (self._attr['Patient_Height']/100)**2 if self._attr['Weight'] > 0 and self._attr['Patient_Height'] > 0 else -1
         self._attr['SeriesNr'] = reader.GetMetaData(1, '0020|0011').strip() if '0020|1011' in reader.GetMetaDataKeys(1) else -1
         self._attr['Size'] = size_array
-        self._attr['Spacing'] = spacing_array
-        self._attr['Origin']  = origin_array
+        self._attr['Spacing'] = Spacing_array
+        self._attr['Origin']  = Origin_array
         self._attr['Direction'] = direction_array
         self._attr['NumberOfComponentsPerPixel'] = ComponentsPerPixel_array
         self._attr['Width'] = width_array
@@ -287,13 +287,13 @@ class volume:
         new_y_size = configuration.standard_volume[2]
         new_z_size = configuration.standard_volume[0]
 
-        # Create the reference image with a zero origin, identity direction cosine matrix and dimension
+        # Create the reference image with a zero Origin, identity direction cosine matrix and dimension
         new_size = [new_x_size, new_y_size, new_z_size]
-        new_spacing = [old_sz * old_spc / new_sz for old_sz, old_spc, new_sz in
+        new_Spacing = [old_sz * old_spc / new_sz for old_sz, old_spc, new_sz in
                        zip(img.GetSize(), img.GetSpacing(), new_size)]
 
         interpolator_type = sitk.sitkLanczosWindowedSinc
-        new_img = sitk.Resample(img, new_size, sitk.Transform(), interpolator_type, img.GetOrigin(), new_spacing,
+        new_img = sitk.Resample(img, new_size, sitk.Transform(), interpolator_type, img.GetOrigin(), new_Spacing,
                                 img.GetDirection(), 0.0, img.GetPixelIDValue())
 
         if apply_curve_smoothing:
@@ -330,7 +330,7 @@ class volume:
         return np.mean(self._data)
 
     def stats_hist(self):
-        plt.subplot(131), plt.hist(self._data.flatten()/1000, range=(0,1)), plt.ylim(0,2000000), plt.title('Original')
+        plt.subplot(131), plt.hist(self._data.flatten()/1000, range=(0,1)), plt.ylim(0,2000000), plt.title('original')
         plt.subplot(132), plt.hist(self.resize(self._data).flatten()/1000, range=(0,1)), plt.ylim(0,2000000), plt.title('Cropped')
         self.preprocess()
         plt.subplot(133), plt.hist(self._data.flatten()), plt.ylim(0,2000000), plt.title('Preprocessed')
