@@ -111,7 +111,7 @@ class patient:
                     if (self._jsondata['data']['ImageType'][i] == 'PRIMARY_OTHER'):
                         if self._verbose: print('PRIMARY_OTHER type images found.')
                         tmp = volume(os.path.splitext(os.path.basename(tgzpath))[0] + '-' + self._jsondata['data']['ImageType'][i], os.path.splitext(os.path.basename(tgzpath))[0], verbose=self._verbose)
-                        tmp.compile(fileset, self._jsondata['data']['Folder'][i], f)
+                        tmp.compile(fileset, f)
                         # if tmp.imgstats() > 0.47:
                         self._volumes = np.append(self._volumes, tmp)
                         # else:
@@ -185,11 +185,12 @@ class volume:
         self.predict()
         return self.output()
 
-    def compile(self, fileset, folderpath, f):
+    def compile(self, fileset, f):
         if self._verbose: print('Compiling images...')
         for x in fileset:
             f.extractall(x, path='temp-unzip')
-        self._orig, reader = self.loadVolume(sys.path.join('temp-unzip', folderpath))
+        folderpath, _ = os.path.split(fileset[0])
+        self._orig, reader = self.loadVolume(os.path.join('temp-unzip', folderpath))
         size_array = self._orig.GetSize()
         origin_array = self._orig.GetOrigin()
         spacing_array = self._orig.GetSpacing()
@@ -200,10 +201,10 @@ class volume:
         depth_array = self._orig.GetDepth()
         self._attr = {}
         self._attr['Patient'] = self._patient
-        self._attr['Age'] = reader.GetMetaData(1, '0010|1010').strip() if '0010|1010' in reader.GetMetaDataKeys(1) else -1
+        self._attr['Age'] = int(reader.GetMetaData(1, '0010|1010').strip()[:3]) if '0010|1010' in reader.GetMetaDataKeys(1) else -1
         self._attr['Weight'] = reader.GetMetaData(1, '0010|1030').strip() if '0010|1030' in reader.GetMetaDataKeys(1) else -1
         self._attr['Patient_Height'] = reader.GetMetaData(1, '0010|1020').strip() if '0010|1020' in reader.GetMetaDataKeys(1) else -1
-        self._attr['BMI'] = self._attr['Weight'] / (self._attr['Patient_Height']/100)**2
+        self._attr['BMI'] = self._attr['Weight'] / (self._attr['Patient_Height']/100)**2 if self._attr['Weight'] > 0 and self._attr['Patient_Height'] > 0 else -1
         self._attr['SeriesNr'] = reader.GetMetaData(1, '0020|0011').strip() if '0020|1011' in reader.GetMetaDataKeys(1) else -1
         self._attr['Size'] = size_array
         self._attr['Spacing'] = spacing_array
@@ -213,9 +214,9 @@ class volume:
         self._attr['Width'] = width_array
         self._attr['Height'] = height_array
         self._attr['Depth'] = depth_array
-        self._attr['Patient Description'] = 'test'
-        self._attr['Patient Path'] = self._attr['Patient'] + '/' + self._attr['Patient Description']
-        self._data = self._orig.GetArrayFromImage()
+        self._attr['Patient Description'] = reader.GetMetaData('0008|103E')
+        self._attr['Patient Path'] = self._attr['Patient'] + '/' + self._attr['Patient Description'] if '0008|103E' in reader.GetMetaDataKeys(1) else -1
+        self._data = sitk.GetArrayFromImage(self._orig)
         self.saveVolume(self._data, 'original', 'h5')
         self.saveVolume(self._data, 'original', 'mhd')
 
@@ -423,7 +424,7 @@ class volume:
 
     def output(self):
         self._data = self._data.reshape(configuration.standard_volume)
-        clipped = self._orig.GetArrayFromImage()
+        clipped = sitk.GetArrayFromImage(self._orig)
         dim_orig = clipped.shape
         comp_factor = 0.05
         x_len = self._clip[1] - self._clip[0]
