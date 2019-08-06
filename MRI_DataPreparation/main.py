@@ -214,7 +214,7 @@ class volume:
         self._attr['Width'] = width_array
         self._attr['Height'] = height_array
         self._attr['Depth'] = depth_array
-        self._attr['Patient Description'] = reader.GetMetaData('0008|103E')
+        self._attr['Patient Description'] = reader.GetMetaData(1, '0008|103E')
         self._attr['Patient Path'] = self._attr['Patient'] + '/' + self._attr['Patient Description'] if '0008|103E' in reader.GetMetaDataKeys(1) else -1
         self._data = sitk.GetArrayFromImage(self._orig)
         self.saveVolume(self._data, 'original', 'h5')
