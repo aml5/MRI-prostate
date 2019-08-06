@@ -41,7 +41,7 @@ config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 set_session(tf.Session(config=config))
 
-output_dir = 'MRI_DataPreparation'
+output_dir = 'MRI_DataPreparation/output'
 json_filepath = 'MRI_DataPreparation/data/StudyCohort_cut.json'
 data_dir = 'MRI_DataPreparation/MRI_cases_test'
 
@@ -58,7 +58,7 @@ class dataset:
         with open(self._jsonpath, 'r') as f:
             metafile = json.load(f)
             for i in range(len(metafile)):
-                data = patient(i, self._jsonpath, self._datapath, stepoutput=False, verbose=True)
+                data = patient(i, self._jsonpath, self._datapath, stepoutput=True, verbose=True)
                 vol, attrs = data.run()
                 if vol is not False:
                     dataset.outputData(h5, vol, attrs)
@@ -146,7 +146,7 @@ class volume:
 
     def saveVolume(self, data, outputtype, filetype='h5'):
         if self._stepoutput:
-            dir = output_dir + self._patient
+            dir = os.path.join(output_dir, self._patient)
             filename = self._volname + '-' + outputtype
             if os.path.exists(dir):
                 pass
@@ -249,12 +249,24 @@ class volume:
         reader = sitk.ImageSeriesReader()
         dicom_names = reader.GetGDCMSeriesFileNames(dir)
         # Sort the dicom files
-        # dicom_names = SortDicomFiles(dicom_names)
+        dicom_names = self.filterRepeats(dicom_names)
         reader.SetFileNames(dicom_names)
         reader.MetaDataDictionaryArrayUpdateOn()
         reader.LoadPrivateTagsOn()
         dicom_series = reader.Execute()
         return dicom_series, reader  # SimpleITK.GetArrayFromImage(dicom_series)
+
+    def filterRepeats(self, files):
+        files_filtered = []
+        for filename in files:
+            mri = sitk.ReadImage(filename)
+            if '0020|9057' not in mri.GetMetaDataKeys():
+                break
+            elif int(mri.GetMetaData('0020|0013')) == int(mri.GetMetaData('0020|9057')):
+                files_filtered.append((filename, float(mri.GetMetaData('0020|0032').split('\\')[2])))
+        files_filtered = sorted(files_filtered, key=lambda x:x[1])
+        files_filtered = [x[0] for x in files_filtered]
+        return files_filtered
 
     def preprocess(self, normalize='CLAHE', verbose=False, apply_curve_smoothing=False):
         # Normalize
@@ -429,6 +441,7 @@ class volume:
         return flattened
 
     def output(self):
+        print(self._clip)
         self._data = self._data.reshape(configuration.standard_volume)
         clipped = sitk.GetArrayFromImage(self._orig)
         dim_orig = clipped.shape
@@ -438,7 +451,7 @@ class volume:
         z_len = self._clip[5] - self._clip[4]
         x_adj = np.ceil(x_len * comp_factor)
         y_adj = np.ceil(y_len * comp_factor)
-        z_adj = 1 # np.ceil(z_len * comp_factor)
+        z_adj = 0 # np.ceil(z_len * comp_factor)
         self._clip[0] -= x_adj
         self._clip[0] *= dim_orig[1] / configuration.standard_volume[1]
         self._clip[1] += x_adj
@@ -452,7 +465,8 @@ class volume:
         self._clip[5] += z_adj
         self._clip[5] *= dim_orig[0] / configuration.standard_volume[0]
         self._clip = [int(i) for i in self._clip]
-        clipped = clipped[self._clip[4]: self._clip[5], self._clip[0]:self._clip[1], self._clip[2]:self._clip[3]]
+        print(self._clip)
+        clipped = clipped[self._clip[4]: self._clip[5], self._clip[2]: self._clip[3], self._clip[0]: self._clip[1]]
         if clipped.size:
             if self._verbose: print('Saving to .h5 file.')
             self.saveVolume(clipped, 'output', 'h5')
@@ -470,6 +484,8 @@ class volume:
 if __name__ == '__main__':
     data = dataset()
     data.run()
+    # data = volume('test')
+    # data.compile_folder(r'C:\Users\Andrew Lu\Documents\Projects\temp-unzip\1.2.840.4267.32.194998566528781064489926669715637743505\1.2.840.4267.32.194022333368743525199783812675264036858')
     print('Script complete. Exiting program now.')
     # data = volume('case12', '', True)
     # data.compile_mhd(r'MRI_Prostate_Segmentation/train/Case12.mhd')
