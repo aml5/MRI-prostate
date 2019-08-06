@@ -196,8 +196,8 @@ class volume:
         folderpath, _ = os.path.split(fileset[0])
         self._orig, reader = self.loadVolume(os.path.join('temp-unzip', folderpath))
         size_array = self._orig.GetSize()
-        Origin_array = self._orig.GetOrigin()
-        Spacing_array = self._orig.GetSpacing()
+        origin_array = self._orig.GetOrigin()
+        spacing_array = self._orig.GetSpacing()
         direction_array = self._orig.GetDirection()
         ComponentsPerPixel_array = self._orig.GetNumberOfComponentsPerPixel()
         width_array = self._orig.GetWidth()
@@ -211,8 +211,8 @@ class volume:
         self._attr['BMI'] = self._attr['Weight'] / (self._attr['Patient_Height']/100)**2 if self._attr['Weight'] > 0 and self._attr['Patient_Height'] > 0 else -1
         self._attr['SeriesNr'] = reader.GetMetaData(1, '0020|0011').strip() if '0020|1011' in reader.GetMetaDataKeys(1) else -1
         self._attr['Size'] = size_array
-        self._attr['Spacing'] = Spacing_array
-        self._attr['Origin']  = Origin_array
+        self._attr['Spacing'] = spacing_array
+        self._attr['Origin']  = origin_array
         self._attr['Direction'] = direction_array
         self._attr['NumberOfComponentsPerPixel'] = ComponentsPerPixel_array
         self._attr['Width'] = width_array
