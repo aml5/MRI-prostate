@@ -45,8 +45,7 @@ class dataset:
 
     def __init__(self,
                  jsonpath='MRI_DataPreparation/data/StudyCohort_cut.json',
-                 datapath='MRI_DataPreparation/'
-                          'MRI_cases_test'):
+                 datapath='MRI_DataPreparation/MRI_cases_test'):
         self._datapath = datapath
         self._jsonpath = jsonpath
 
@@ -190,28 +189,33 @@ class volume:
         if self._verbose: print('Compiling images...')
         self._orig = []
         self._attr = {}
-        for x in fileset:
-            f.extract(x, path='temp-unzip')
-            self._orig.append(pydicom.dcmread(os.path.join('temp-unzip', x)))
-        self._orig.sort(key=lambda x: x.ImagePositionPatient[2])
-        self._attr['Spacing'] = (*self._orig[0].PixelSpacing, self._orig[0].SpacingBetweenSlices)
-        self._attr['Origin']  = self._orig[0].ImagePositionPatient
+        f.extractall(path='temp-unzip', members=fileset)
+        self._orig = self.loadVolume('temp-unzip')
+        size_array = self._orig.GetSize()
+        origin_array = self._orig.GetOrigin()
+        spacing_array = self._orig.GetSpacing()
+        direction_array = self._orig.GetDirection()
+        ComponentsPerPixel_array = self._orig.GetNumberOfComponentsPerPixel()
+        width_array = self._orig.GetWidth()
+        height_array = self._orig.GetHeight()
+        depth_array = self._orig.GetDepth()
         self._attr['Patient'] = self._patient
-        self._attr['Age'] = 50
-        self._attr['Weight'] = 150
-        self._attr['BMI'] = 20
-        self._attr['Patient_Height'] = 15
-        self._attr['SeriesNr'] = 15
-        self._attr['Size'] = 15
-        self._attr['Direction'] = 15
-        self._attr['NumberOfComponentsPerPixel'] = 15
-        self._attr['Width'] = 15
-        self._attr['Height'] = 15
-        self._attr['Depth'] = 15
+        # self._attr['Age'] = int(patient_age)
+        # self._attr['Weight'] = int(patient_weight)
+        # self._attr['BMI'] = int(patient_bmi)
+        # self._attr['Patient_Height'] = int(patient_size)
+        # self._attr['SeriesNr'] = int(series_number)
+        self._attr['Size'] = size_array
+        self._attr['Spacing'] = spacing_array
+        self._attr['Origin']  = origin_array
+        self._attr['Direction'] = direction_array
+        self._attr['NumberOfComponentsPerPixel'] = ComponentsPerPixel_array
+        self._attr['Width'] = width_array
+        self._attr['Height'] = height_array
+        self._attr['Depth'] = depth_array
         self._attr['Patient Description'] = 'test'
         self._attr['Patient Path'] = self._attr['Patient'] + '/' + self._attr['Patient Description']
-        self._orig = np.array([self._orig[i].pixel_array for i in range(len(fileset))])
-        self._data = self._orig.copy()
+        self._data = self._orig.GetArrayFromImage()
         self.saveVolume(self._data, 'original', 'h5')
         self.saveVolume(self._data, 'original', 'mhd')
 
@@ -232,6 +236,16 @@ class volume:
         self._data = np.array([self._orig[i].pixel_array for i in range(len(files))])
         self.saveVolume(self._data, 'original', 'h5')
         self.saveVolume(self._data, 'original', 'mhd')
+
+    def loadVolume(self, dir):
+        """Reads an entire DICOM series of slices from 'input_dir' and returns its pixel data as an array."""
+        reader = sitk.ImageSeriesReader()
+        dicom_names = reader.GetGDCMSeriesFileNames(dir)
+        # Sort the dicom files
+        # dicom_names = SortDicomFiles(dicom_names)
+        reader.SetFileNames(dicom_names)
+        dicom_series = reader.Execute()
+        return dicom_series  # SimpleITK.GetArrayFromImage(dicom_series)
 
     def preprocess(self, normalize='CLAHE', verbose=False, apply_curve_smoothing=False):
         # Normalize
@@ -407,7 +421,7 @@ class volume:
 
     def output(self):
         self._data = self._data.reshape(configuration.standard_volume)
-        clipped = self._orig.copy()
+        clipped = self._orig.GetArrayFromImage()
         dim_orig = clipped.shape
         comp_factor = 0.05
         x_len = self._clip[1] - self._clip[0]
