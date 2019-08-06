@@ -187,10 +187,8 @@ class volume:
 
     def compile(self, fileset, f):
         if self._verbose: print('Compiling images...')
-        self._orig = []
-        self._attr = {}
         f.extractall(path='temp-unzip', members=fileset)
-        self._orig = self.loadVolume('temp-unzip')
+        self._orig, reader = self.loadVolume('temp-unzip')
         size_array = self._orig.GetSize()
         origin_array = self._orig.GetOrigin()
         spacing_array = self._orig.GetSpacing()
@@ -199,12 +197,13 @@ class volume:
         width_array = self._orig.GetWidth()
         height_array = self._orig.GetHeight()
         depth_array = self._orig.GetDepth()
+        self._attr = {}
         self._attr['Patient'] = self._patient
-        # self._attr['Age'] = int(patient_age)
-        # self._attr['Weight'] = int(patient_weight)
-        # self._attr['BMI'] = int(patient_bmi)
-        # self._attr['Patient_Height'] = int(patient_size)
-        # self._attr['SeriesNr'] = int(series_number)
+        self._attr['Age'] = reader.GetMetaData(1, '0010|1010').strip() if '0010|1010' in reader.GetMetaDataKeys(1) else -1
+        self._attr['Weight'] = reader.GetMetaData(1, '0010|1030').strip() if '0010|1030' in reader.GetMetaDataKeys(1) else -1
+        self._attr['Patient_Height'] = reader.GetMetaData(1, '0010|1020').strip() if '0010|1020' in reader.GetMetaDataKeys(1) else -1
+        self._attr['BMI'] = self._attr['Weight'] / (self._attr['Patient_Height']/100)**2
+        self._attr['SeriesNr'] = reader.GetMetaData(1, '0020|0011').strip() if '0020|1011' in reader.GetMetaDataKeys(1) else -1
         self._attr['Size'] = size_array
         self._attr['Spacing'] = spacing_array
         self._attr['Origin']  = origin_array
@@ -244,8 +243,10 @@ class volume:
         # Sort the dicom files
         # dicom_names = SortDicomFiles(dicom_names)
         reader.SetFileNames(dicom_names)
+        reader.MetaDataDictionaryArrayUpdateOn()
+        reader.LoadPrivateTagsOn()
         dicom_series = reader.Execute()
-        return dicom_series  # SimpleITK.GetArrayFromImage(dicom_series)
+        return dicom_series, reader  # SimpleITK.GetArrayFromImage(dicom_series)
 
     def preprocess(self, normalize='CLAHE', verbose=False, apply_curve_smoothing=False):
         # Normalize
