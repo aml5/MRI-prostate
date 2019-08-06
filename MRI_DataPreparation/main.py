@@ -41,11 +41,15 @@ config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 set_session(tf.Session(config=config))
 
+output_dir = 'MRI_DataPreparation'
+json_filepath = 'MRI_DataPreparation/data/StudyCohort_cut.json'
+data_dir = 'MRI_DataPreparation/MRI_cases_test'
+
 class dataset:
 
     def __init__(self,
-                 jsonpath='MRI_DataPreparation/data/StudyCohort_cut.json',
-                 datapath='MRI_DataPreparation/MRI_cases_test'):
+                 jsonpath=json_filepath,
+                 datapath=data_dir):
         self._datapath = datapath
         self._jsonpath = jsonpath
 
@@ -110,7 +114,7 @@ class patient:
                 for i, fileset in enumerate(self._jsondata["data"]["FileList"]):
                     if (self._jsondata['data']['ImageType'][i] == 'PRIMARY_OTHER'):
                         if self._verbose: print('PRIMARY_OTHER type images found.')
-                        tmp = volume(os.path.splitext(os.path.basename(tgzpath))[0] + '-' + self._jsondata['data']['ImageType'][i], os.path.splitext(os.path.basename(tgzpath))[0], verbose=self._verbose)
+                        tmp = volume(os.path.splitext(os.path.basename(tgzpath))[0] + '-' + self._jsondata['data']['ImageType'][i], os.path.splitext(os.path.basename(tgzpath))[0], stepoutput=self._stepoutput, verbose=self._verbose)
                         tmp.compile(fileset, f)
                         # if tmp.imgstats() > 0.47:
                         self._volumes = np.append(self._volumes, tmp)
@@ -140,7 +144,7 @@ class volume:
 
     def saveVolume(self, data, outputtype, filetype='h5'):
         if self._stepoutput:
-            dir = 'MRI_DataPreparation/output/' + self._patient
+            dir = output_dir + self._patient
             filename = self._volname + '-' + outputtype
             if os.path.exists(dir):
                 pass
@@ -214,7 +218,7 @@ class volume:
         self._attr['Width'] = width_array
         self._attr['Height'] = height_array
         self._attr['Depth'] = depth_array
-        self._attr['Patient Description'] = reader.GetMetaData(1, '0008|103E')
+        self._attr['Patient Description'] = reader.GetMetaData(1, '0008|103E') if '0008|103E' in reader.GetMetaDataKeys(1) else -1
         self._attr['Patient Path'] = self._attr['Patient'] + '/' + self._attr['Patient Description'] if '0008|103E' in reader.GetMetaDataKeys(1) else -1
         self._data = sitk.GetArrayFromImage(self._orig)
         self.saveVolume(self._data, 'original', 'h5')
