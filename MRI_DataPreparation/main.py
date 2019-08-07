@@ -474,10 +474,10 @@ class volume:
             self._clip[5] *= dim_orig[2] / configuration.standard_volume[0]
             self._clip = [int(i) for i in self._clip]
 
-            crop = sitk.ExtractImageFilter()
-            crop.SetSize([self._clip[1] - self._clip[0], self._clip[3] - self._clip[2], self._clip[5] - self._clip[4]])
-            crop.SetIndex([self._clip[0], self._clip[2], self._clip[4]])
-            clipped = crop.Execute(self._orig)
+            # crop = sitk.ExtractImageFilter()
+            # crop.SetSize([self._clip[1] - self._clip[0], self._clip[3] - self._clip[2], self._clip[5] - self._clip[4]])
+            # crop.SetIndex([self._clip[0], self._clip[2], self._clip[4]])
+            clipped = self._orig[self._clip[0] : self._clip[1], self._clip[2] : self._clip[3], self._clip[4] : self._clip[5]]
             # croppingBounds = [[self._clip[1], self._clip[3], self._clip[5]], [self._clip[0], self._clip[2], self._clip[4]]]
             # print(croppingBounds)
             # clipped = crop.Execute(self._orig, croppingBounds[0], croppingBounds[1])
@@ -497,11 +497,14 @@ class volume:
                 self.saveVolume(data, 'clipped', 'txt')
             # sitkimg = sitk.GetImageFromArray(self._data)
             # sitk.WriteImage(sitkimg, 'data.mhd')
-            self._sitk = clipped.copy()
+            self._sitk = clipped
 
     def postprocess(self):
+        new_Spacing = [old_sz * old_spc / new_sz for old_sz, old_spc, new_sz in
+                       zip(self._sitk.GetSize(), self._sitk.GetSpacing(), output_size)]
         output_sitk = sitk.Resample(self._sitk, output_size, sitk.Transform(),
-                                sitk.sitkLanczosWindowedSinc, 0.0, self._sitk.GetPixelIDValue())
+                                sitk.sitkLanczosWindowedSinc, self._sitk.GetOrigin(), new_Spacing,
+                                self._sitk.GetDirection(), 0.0, self._sitk.GetPixelIDValue())
         self.setAttributes(output_sitk)
         self._data = sitk.GetArrayFromImage(output_sitk)
 
