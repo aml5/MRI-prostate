@@ -262,16 +262,16 @@ class volume:
 
     def filterRepeats(self, files):
         files_filtered = []
-        stopped = False
-        for filename in files:
+        for i, filename in enumerate(files):
             mri = sitk.ReadImage(filename)
-            if '0020|9057' not in mri.GetMetaDataKeys():
-                stopped = True
+            space_z = float(mri.GetMetaData('0020|0032').split('\\')[2])
+            if i == 0:
+                prev_z = space_z
+            if abs(space_z - prev_z > 10.0):
                 break
-            elif int(mri.GetMetaData('0020|0013')) == int(mri.GetMetaData('0020|9057')):
-                files_filtered.append((filename, float(mri.GetMetaData('0020|0032').split('\\')[2])))
-        if stopped:
-            return files
+            else:
+                files_filtered.append((filename, space_z))
+                prev_z = space_z
         files_filtered = sorted(files_filtered, key=lambda x:x[1])
         files_filtered = [x[0] for x in files_filtered]
         return files_filtered
@@ -490,6 +490,7 @@ class volume:
             # clipped = crop.Execute(self._orig)
             # clipped = sitk.Crop(self._orig, [self._clip[0], self._clip[2], self._clip[4]], [self._clip[1], self._clip[3], self._clip[5]])
             self.setAttributes(clipped)
+            self._attr['Clipped_Boundary'] = (self._clip[0], self._clip[1], self._clip[2], self._data[3], self._data[4], self._data[5])
 
             data = sitk.GetArrayFromImage(clipped)
             if data.size:
