@@ -474,10 +474,17 @@ class volume:
             self._clip[5] *= dim_orig[2] / configuration.standard_volume[0]
             self._clip = [int(i) for i in self._clip]
 
-            crop = sitk.CropImageFilter()
-            crop.SetLowerBound(self._clip[0], self._clip[2], self._clip[4])
-            crop.SetUpperBound(self._clip[1], self._clip[3], self._clip[5])
+            crop = sitk.ExtractImageFilter()
+            crop.SetSize([self._clip[1] - self._clip[0], self._clip[3] - self._clip[2], self._clip[5] - self._clip[4]])
+            crop.SetIndex([self._clip[0], self._clip[2], self._clip[4]])
             clipped = crop.Execute(self._orig)
+            # croppingBounds = [[self._clip[1], self._clip[3], self._clip[5]], [self._clip[0], self._clip[2], self._clip[4]]]
+            # print(croppingBounds)
+            # clipped = crop.Execute(self._orig, croppingBounds[0], croppingBounds[1])
+            # crop.SetLowerBoundaryCropSize([self._clip[0], self._clip[2], self._clip[4]])
+            # crop.SetUpperBoundaryCropSize([self._clip[1], self._clip[3], self._clip[5]])
+            # clipped = crop.Execute(self._orig)
+            # clipped = sitk.Crop(self._orig, [self._clip[0], self._clip[2], self._clip[4]], [self._clip[1], self._clip[3], self._clip[5]])
             self.setAttributes(clipped)
 
             data = sitk.GetArrayFromImage(clipped)
