@@ -59,7 +59,7 @@ class dataset:
         with open(self._jsonpath, 'r') as f:
             metafile = json.load(f)
             for i in range(len(metafile)):
-                data = patient(i, self._jsonpath, self._datapath, stepoutput=False, verbose=True)
+                data = patient(i, self._jsonpath, self._datapath, stepoutput=True, verbose=True)
                 vol, attrs = data.run()
                 if vol is not False:
                     dataset.outputData(h5, vol, attrs)
@@ -253,7 +253,7 @@ class volume:
         reader = sitk.ImageSeriesReader()
         dicom_names = reader.GetGDCMSeriesFileNames(dir)
         # Sort the dicom files
-        dicom_names = self.filterRepeats(dicom_names)
+        # dicom_names = self.filterRepeats(dicom_names)
         reader.SetFileNames(dicom_names)
         reader.MetaDataDictionaryArrayUpdateOn()
         reader.LoadPrivateTagsOn()
@@ -262,12 +262,16 @@ class volume:
 
     def filterRepeats(self, files):
         files_filtered = []
+        stopped = False
         for filename in files:
             mri = sitk.ReadImage(filename)
             if '0020|9057' not in mri.GetMetaDataKeys():
+                stopped = True
                 break
             elif int(mri.GetMetaData('0020|0013')) == int(mri.GetMetaData('0020|9057')):
                 files_filtered.append((filename, float(mri.GetMetaData('0020|0032').split('\\')[2])))
+        if stopped:
+            return files
         files_filtered = sorted(files_filtered, key=lambda x:x[1])
         files_filtered = [x[0] for x in files_filtered]
         return files_filtered
@@ -507,6 +511,8 @@ class volume:
                                 self._sitk.GetDirection(), 0.0, self._sitk.GetPixelIDValue())
         self.setAttributes(output_sitk)
         self._data = sitk.GetArrayFromImage(output_sitk)
+        self.saveVolume(self._data, 'output', 'h5')
+        self.saveVolume(self._data, 'output', 'mhd')
 
     def output(self):
         return self._data, self._attr
@@ -517,6 +523,9 @@ class volume:
 if __name__ == '__main__':
     data = dataset()
     data.run()
+    # data = volume('test')
+    # data.compile_folder('temp-unzip/1.2.840.4267.32.260456626265319904345675724263373644864/1.2.840.4267.32.258978919667629748006415331993516650574')
+    # data.run()
     print('Script complete. Exiting program now.')
     # data = volume('case12', '', True)
     # data.compile_mhd(r'MRI_Prostate_Segmentation/train/Case12.mhd')
