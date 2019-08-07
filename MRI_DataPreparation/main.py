@@ -41,9 +41,10 @@ config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 set_session(tf.Session(config=config))
 
-output_dir = 'MRI_DataPreparation'
+output_dir = 'MRI_DataPreparation/output'
 json_filepath = 'MRI_DataPreparation/data/StudyCohort_cut.json'
 data_dir = 'MRI_DataPreparation/MRI_cases_test'
+output_size = [144,144,16]
 
 class dataset:
 
@@ -60,7 +61,8 @@ class dataset:
             for i in range(len(metafile)):
                 data = patient(i, self._jsonpath, self._datapath, stepoutput=False, verbose=True)
                 vol, attrs = data.run()
-                dataset.outputData(h5, vol, attrs)
+                if vol is not False:
+                    dataset.outputData(h5, vol, attrs)
         h5.close()
 
     @classmethod
@@ -98,6 +100,7 @@ class patient:
             # volume.imgstats()
             return volume.run() # for now
             # volume.stats_hist()
+        return False, False
 
     def readJSON(self):
         path = self._jsonpath
@@ -114,7 +117,7 @@ class patient:
                 for i, fileset in enumerate(self._jsondata["data"]["FileList"]):
                     if (self._jsondata['data']['ImageType'][i] == 'PRIMARY_OTHER'):
                         if self._verbose: print('PRIMARY_OTHER type images found.')
-                        tmp = volume(os.path.splitext(os.path.basename(tgzpath))[0] + '-' + self._jsondata['data']['ImageType'][i], os.path.splitext(os.path.basename(tgzpath))[0], stepoutput=self._stepoutput, verbose=self._verbose)
+                        tmp = volume(os.path.splitext(os.path.basename(tgzpath))[0] + '-' + self._jsondata['data']['ImageType'][i], os.path.splitext(os.path.basename(tgzpath))[0], self._jsondata['data']['ImageType'][i], stepoutput=self._stepoutput, verbose=self._verbose)
                         tmp.compile(fileset, f)
                         # if tmp.imgstats() > 0.47:
                         self._volumes = np.append(self._volumes, tmp)
@@ -129,9 +132,10 @@ class patient:
 
 class volume:
 
-    def __init__(self, volname, patient='', stepoutput=False, verbose=False, weightpath=r"C:\Users\Andrew Lu\Documents\Projects\MRI_Prostate_Segmentation\results\result_Prostate_D3_Segmentation_20190705-1805\weights-32.h5"):
+    def __init__(self, volname, patient='', imagetype='PRIMARY_OTHER', stepoutput=False, verbose=False, weightpath=r"C:\Users\Andrew Lu\Documents\Projects\MRI_Prostate_Segmentation\results\result_Prostate_D3_Segmentation_20190705-1805\weights-32.h5"):
         self._weightpath = weightpath
         self._volname = volname
+        self._imagetype = imagetype
         self._stepoutput = stepoutput
         self._verbose = verbose
         self._patient = volname if patient == '' else patient
@@ -142,9 +146,17 @@ class volume:
     #     self._weightpath = weightpath
     #     self._data = utils.LoadFile(self._filename,normalize='CLAHE')
 
+    def run(self):
+        self.preprocess()
+        self.modelConfig()
+        self.predict()
+        self.clip()
+        self.postprocess()
+        return self.output()
+
     def saveVolume(self, data, outputtype, filetype='h5'):
         if self._stepoutput:
-            dir = output_dir + self._patient
+            dir = os.path.join(output_dir, self._patient)
             filename = self._volname + '-' + outputtype
             if os.path.exists(dir):
                 pass
@@ -183,16 +195,10 @@ class volume:
     #     sitk.WriteImage(sitkimg, 'output/' + volname + '-' + outputtype + '.mhd')
     #     print('Volume saved. \n ----------')
 
-    def run(self):
-        self.preprocess()
-        self.modelConfig()
-        self.predict()
-        return self.output()
-
     def compile(self, fileset, f):
         if self._verbose: print('Compiling images...')
         for x in fileset:
-            f.extracta(x, path='temp-unzip')
+            f.extract(x, path='temp-unzip')
         folderpath, _ = os.path.split(fileset[0])
         self._orig, reader = self.loadVolume(os.path.join('temp-unzip', folderpath))
         size_array = self._orig.GetSize()
@@ -218,19 +224,19 @@ class volume:
         self._attr['Width'] = width_array
         self._attr['Height'] = height_array
         self._attr['Depth'] = depth_array
-        self._attr['Patient Description'] = reader.GetMetaData(1, '0008|103E') if '0008|103E' in reader.GetMetaDataKeys(1) else -1
-        self._attr['Patient Path'] = self._attr['Patient'] + '/' + self._attr['Patient Description'] if '0008|103E' in reader.GetMetaDataKeys(1) else -1
+        self._attr['Patient Description'] = reader.GetMetaData(1, '0008|103e') if '0008|103e' in reader.GetMetaDataKeys(1) else 'No Description'
+        self._attr['Patient Path'] = os.path.join(self._patient, self._imagetype)
         self._data = sitk.GetArrayFromImage(self._orig)
         self.saveVolume(self._data, 'original', 'h5')
         self.saveVolume(self._data, 'original', 'mhd')
 
     def compile_mhd(self, filename):
         img = sitk.ReadImage(filename)
-        self._orig = sitk.GetArrayFromImage(img)
+        self._orig = img.copy()
         self._attr = {}
         self._attr['Spacing'] = img.GetSpacing()
         self._attr['Origin']  = img.GetOrigin()
-        self._data = self._orig.copy()
+        self._data = sitk.GetArrayFromImage(self._orig)
         self.saveVolume(self._data, 'original', 'h5')
         self.saveVolume(self._data, 'original', 'mhd')
 
@@ -247,12 +253,24 @@ class volume:
         reader = sitk.ImageSeriesReader()
         dicom_names = reader.GetGDCMSeriesFileNames(dir)
         # Sort the dicom files
-        # dicom_names = SortDicomFiles(dicom_names)
+        dicom_names = self.filterRepeats(dicom_names)
         reader.SetFileNames(dicom_names)
         reader.MetaDataDictionaryArrayUpdateOn()
         reader.LoadPrivateTagsOn()
         dicom_series = reader.Execute()
         return dicom_series, reader  # SimpleITK.GetArrayFromImage(dicom_series)
+
+    def filterRepeats(self, files):
+        files_filtered = []
+        for filename in files:
+            mri = sitk.ReadImage(filename)
+            if '0020|9057' not in mri.GetMetaDataKeys():
+                break
+            elif int(mri.GetMetaData('0020|0013')) == int(mri.GetMetaData('0020|9057')):
+                files_filtered.append((filename, float(mri.GetMetaData('0020|0032').split('\\')[2])))
+        files_filtered = sorted(files_filtered, key=lambda x:x[1])
+        files_filtered = [x[0] for x in files_filtered]
+        return files_filtered
 
     def preprocess(self, normalize='CLAHE', verbose=False, apply_curve_smoothing=False):
         # Normalize
@@ -379,7 +397,6 @@ class volume:
     def predict(self):
         self.load()
         if self._verbose: print('Running prediction...')
-        self._clip = [384, 0, 384, 0, 0, 300]
         predict_set = np.vstack((self._data, self._zeros))  # np.load(self._filename)
         predict_set = predict_set.reshape(*predict_set.shape, 1)
         prelim = self._model.predict(predict_set)[-1]
@@ -394,23 +411,28 @@ class volume:
         self.findBorder(mask)
 
     def findBorder(self, mask):
+        clip = [384, 0, 384, 0, 0, 300]
         # finds z limits
         for i in range(mask.shape[0]):
             if self.isEmpty(mask[i]):
-                if (i - self._clip[4] <= 1):
-                    self._clip[4] = i
+                if (i - clip[4] <= 1):
+                    clip[4] = i
             if not self.isEmpty(mask[i]):
-                self._clip[5] = i + 1
+                clip[5] = i + 1
 
         # finds x and y limits
         mask_xy = self.flatten(mask)
         for i in range(mask_xy.shape[0]):
             for j in range(mask_xy.shape[1]):
                 if mask_xy[i][j]:
-                    if self._clip[0] > j: self._clip[0] = j
-                    if self._clip[1] < j: self._clip[1] = j
-                    if self._clip[2] > i: self._clip[2] = i
-                    if self._clip[3] < i: self._clip[3] = i
+                    if clip[0] > j: clip[0] = j
+                    if clip[1] < j: clip[1] = j
+                    if clip[2] > i: clip[2] = i
+                    if clip[3] < i: clip[3] = i
+        if not clip == [384, 0, 384, 0, 0, 300]:
+            self._clip = clip
+        else:
+            self._clip = None
 
     def isEmpty(self, slice):
         if (np.count_nonzero(slice) == 0):
@@ -426,41 +448,58 @@ class volume:
                         flattened[i][j] = 1
         return flattened
 
+    def clip(self):
+        if self._clip is not None:
+            self._data = self._data.reshape(configuration.standard_volume)
+            dim_orig = self._orig.GetSize()
+            comp_factor = 0.05
+            x_len = self._clip[1] - self._clip[0]
+            y_len = self._clip[3] - self._clip[2]
+            z_len = self._clip[5] - self._clip[4]
+            x_adj = np.ceil(x_len * comp_factor)
+            y_adj = np.ceil(y_len * comp_factor)
+            z_adj = 1 # np.ceil(z_len * comp_factor)
+
+            self._clip[0] -= min(x_adj, self._clip[0])
+            self._clip[0] *= dim_orig[0] / configuration.standard_volume[1]
+            self._clip[1] += min(x_adj, dim_orig[0] - self._clip[1])
+            self._clip[1] *= dim_orig[0] / configuration.standard_volume[1]
+            self._clip[2] -= min(y_adj, self._clip[2])
+            self._clip[2] *= dim_orig[1] / configuration.standard_volume[2]
+            self._clip[3] += min(y_adj, dim_orig[1] - self._clip[3])
+            self._clip[3] *= dim_orig[1] / configuration.standard_volume[2]
+            self._clip[4] -= min(z_adj, self._clip[4])
+            self._clip[4] *= dim_orig[2] / configuration.standard_volume[0]
+            self._clip[5] += min(z_adj, dim_orig[2] - self._clip[5])
+            self._clip[5] *= dim_orig[2] / configuration.standard_volume[0]
+            self._clip = [int(i) for i in self._clip]
+
+            crop = sitk.CropImageFilter()
+            crop.SetLowerBound(self._clip[0], self._clip[2], self._clip[4])
+            crop.SetUpperBound(self._clip[1], self._clip[3], self._clip[5])
+            clipped = crop.Execute(self._orig)
+            self.setAttributes(clipped)
+
+            data = sitk.GetArrayFromImage(clipped)
+            if data.size:
+                if self._verbose: print('Saving to .h5 file.')
+                self.saveVolume(data, 'clipped', 'h5')
+                self.saveVolume(data, 'clipped', 'mhd')
+            else:
+                if self._verbose: print('No output file.')
+                self.saveVolume(data, 'clipped', 'txt')
+            # sitkimg = sitk.GetImageFromArray(self._data)
+            # sitk.WriteImage(sitkimg, 'data.mhd')
+            self._sitk = clipped.copy()
+
+    def postprocess(self):
+        output_sitk = sitk.Resample(self._sitk, output_size, sitk.Transform(),
+                                sitk.sitkLanczosWindowedSinc, 0.0, self._sitk.GetPixelIDValue())
+        self.setAttributes(output_sitk)
+        self._data = sitk.GetArrayFromImage(output_sitk)
+
     def output(self):
-        self._data = self._data.reshape(configuration.standard_volume)
-        clipped = sitk.GetArrayFromImage(self._orig)
-        dim_orig = clipped.shape
-        comp_factor = 0.05
-        x_len = self._clip[1] - self._clip[0]
-        y_len = self._clip[3] - self._clip[2]
-        z_len = self._clip[5] - self._clip[4]
-        x_adj = np.ceil(x_len * comp_factor)
-        y_adj = np.ceil(y_len * comp_factor)
-        z_adj = 1 # np.ceil(z_len * comp_factor)
-        self._clip[0] -= x_adj
-        self._clip[0] *= dim_orig[1] / configuration.standard_volume[1]
-        self._clip[1] += x_adj
-        self._clip[1] *= dim_orig[1] / configuration.standard_volume[1]
-        self._clip[2] -= y_adj
-        self._clip[2] *= dim_orig[2] / configuration.standard_volume[2]
-        self._clip[3] += y_adj
-        self._clip[3] *= dim_orig[2] / configuration.standard_volume[2]
-        self._clip[4] -= z_adj
-        self._clip[4] *= dim_orig[0] / configuration.standard_volume[0]
-        self._clip[5] += z_adj
-        self._clip[5] *= dim_orig[0] / configuration.standard_volume[0]
-        self._clip = [int(i) for i in self._clip]
-        clipped = clipped[self._clip[4]: self._clip[5], self._clip[0]:self._clip[1], self._clip[2]:self._clip[3]]
-        if clipped.size:
-            if self._verbose: print('Saving to .h5 file.')
-            self.saveVolume(clipped, 'output', 'h5')
-            self.saveVolume(clipped, 'output', 'mhd')
-        else:
-            if self._verbose: print('No output file.')
-            self.saveVolume(clipped, 'output', 'txt')
-        # sitkimg = sitk.GetImageFromArray(self._data)
-        # sitk.WriteImage(sitkimg, 'data.mhd')
-        return clipped, self._attr
+        return self._data, self._attr
 
     def h5open(self):
         pass
