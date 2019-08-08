@@ -34,6 +34,7 @@ import json
 import pydicom
 import tarfile
 import h5py
+import pandas as pd
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
 os.environ["CUDA_VISIBLE_DEVICES"]= configuration.initial_gpu
 from keras.backend.tensorflow_backend import set_session
@@ -45,6 +46,8 @@ output_dir = 'MRI_DataPreparation/output'
 json_filepath = 'MRI_DataPreparation/data/StudyCohort_cut.json'
 data_dir = 'MRI_DataPreparation/MRI_cases_test'
 output_size = [144,144,16]
+MEAN_THRESHOLD = 0.44
+
 
 class dataset:
 
@@ -60,28 +63,44 @@ class dataset:
             metafile = json.load(f)
             for i in range(len(metafile)):
                 data = patient(i, self._jsonpath, self._datapath, stepoutput=True, verbose=True)
-                vol, attrs = data.run()
-                if vol is not False:
-                    dataset.outputData(h5, vol, attrs)
+                vols = data.run()
+                if vols is not None:
+                    dataset.outputData(h5, vols)
         h5.close()
 
+    def stats(self):
+        means = []
+        with open(self._jsonpath, 'r') as f:
+            metafile = json.load(f)
+            for i in range(len(metafile)):
+                data = patient(i, self._jsonpath, self._datapath, stepoutput=True, verbose=True)
+                mean = data.run_stats()
+                if mean is not None:
+                    means += mean
+        csv = pd.DataFrame(means, columns=['patient (+ img num)', 'mean', 'median', 'max',
+                                           'mean/max', 'median/max', 'std/max', 'echo time'])
+        csv.to_csv('stats.csv')
+
     @classmethod
-    def outputData(cls, h5, vol, attrs):
-        group = h5.create_group(attrs['Patient Path'])
-        pixeldata = group.create_dataset(attrs['Patient'], data=vol)
-        pixeldata.attrs.create('Age', attrs['Age'])
-        pixeldata.attrs.create('Weight', attrs['Weight'])
-        pixeldata.attrs.create('BMI', attrs['BMI'])
-        pixeldata.attrs.create('Patient_Height', attrs['Patient_Height'])
-        pixeldata.attrs.create('SeriesNr', attrs['SeriesNr'])
-        pixeldata.attrs.create('Size', attrs['Size'])
-        pixeldata.attrs.create('Origin', attrs['Origin'])
-        pixeldata.attrs.create('Spacing', attrs['Spacing'])
-        pixeldata.attrs.create('Direction', attrs['Direction'])
-        pixeldata.attrs.create('NumberOfComponentsPerPixel', attrs['NumberOfComponentsPerPixel'])
-        pixeldata.attrs.create('Width', attrs['Width'])
-        pixeldata.attrs.create('Height', attrs['Height'])
-        pixeldata.attrs.create('Depth', attrs['Depth'])
+    def outputData(cls, h5, vols):
+        for vol in vols:
+            attrs = vol._attr
+            data_array = vol._data
+            group = h5.create_group(attrs['Patient Path'])
+            pixeldata = group.create_dataset(attrs['Patient'], data=data_array)
+            pixeldata.attrs.create('Age', attrs['Age'])
+            pixeldata.attrs.create('Weight', attrs['Weight'])
+            pixeldata.attrs.create('BMI', attrs['BMI'])
+            pixeldata.attrs.create('Patient_Height', attrs['Patient_Height'])
+            pixeldata.attrs.create('SeriesNr', attrs['SeriesNr'])
+            pixeldata.attrs.create('Size', attrs['Size'])
+            pixeldata.attrs.create('Origin', attrs['Origin'])
+            pixeldata.attrs.create('Spacing', attrs['Spacing'])
+            pixeldata.attrs.create('Direction', attrs['Direction'])
+            pixeldata.attrs.create('NumberOfComponentsPerPixel', attrs['NumberOfComponentsPerPixel'])
+            pixeldata.attrs.create('Width', attrs['Width'])
+            pixeldata.attrs.create('Height', attrs['Height'])
+            pixeldata.attrs.create('Depth', attrs['Depth'])
 
 class patient:
 
@@ -95,12 +114,19 @@ class patient:
         self.createData()
 
     def run(self):
+        volumes = []
         for volume in self._volumes:
             # volume.preprocess()
             # volume.imgstats()
-            return volume.run() # for now
+            volumes.append(volume.run()) # for now
             # volume.stats_hist()
-        return False, False
+        return volumes
+
+    def run_stats(self):
+        stats = []
+        for volume in self._volumes:
+            stats += volume.run_stats()
+        return stats
 
     def readJSON(self):
         path = self._jsonpath
@@ -115,18 +141,18 @@ class patient:
         if os.path.exists(tgzpath):
             with tarfile.open(tgzpath) as f:
                 for i, fileset in enumerate(self._jsondata["data"]["FileList"]):
-                    if (self._jsondata['data']['ImageType'][i] == 'PRIMARY_OTHER'):
-                        if self._verbose: print('PRIMARY_OTHER type images found.')
-                        tmp = volume(os.path.splitext(os.path.basename(tgzpath))[0] + '-' + self._jsondata['data']['ImageType'][i], os.path.splitext(os.path.basename(tgzpath))[0], self._jsondata['data']['ImageType'][i], stepoutput=self._stepoutput, verbose=self._verbose)
-                        tmp.compile(fileset, f)
-                        # if tmp.imgstats() > 0.47:
-                        self._volumes = np.append(self._volumes, tmp)
-                        # else:
-                        #     if self._verbose: print(f'Non-T2 image removed.')
-                        # except NotImplementedError:
-                        #     print('Skipping compressed image, directory: ' + self._jsondata["data"]["Folder"][i])
-                    else:
-                        if self._verbose: print('No PRIMARY_OTHER type images. Datatype: ' + self._jsondata['data']['ImageType'][i])
+                    # if (self._jsondata['data']['ImageType'][i] == 'PRIMARY_OTHER'):
+                    if self._verbose: print('PRIMARY_OTHER type images found.')
+                    tmp = volume(os.path.splitext(os.path.basename(tgzpath))[0] + '-' + self._jsondata['data']['ImageType'][i], os.path.splitext(os.path.basename(tgzpath))[0], self._jsondata['data']['ImageType'][i], stepoutput=self._stepoutput, verbose=self._verbose)
+                    tmp.compile(fileset, f)
+                    # if tmp.imgstats() > MEAN_THRESHOLD:
+                    self._volumes = np.append(self._volumes, tmp)
+                    # else:
+                    #     if self._verbose: print(f'Non-T2 image removed.')
+                    # except NotImplementedError:
+                    #     print('Skipping compressed image, directory: ' + self._jsondata["data"]["Folder"][i])
+                # else:
+                #     if self._verbose: print('No PRIMARY_OTHER type images. Datatype: ' + self._jsondata['data']['ImageType'][i])
                     # tmp = volume.getVolume(tmp)
                     # tmp.run()
 
@@ -153,6 +179,22 @@ class volume:
         self.clip()
         self.postprocess()
         return self.output()
+
+    def run_stats(self):
+        stats = []
+        stats += [[self._volname + '-total', np.mean(self._data), np.median(self._data), np.max(self._data), np.mean(self._data)/np.max(self._data), np.median(self._data)/np.max(self._data), np.std(self._data)/np.max(self._data), self._attr['Echo_Time']]]
+        for i, data in enumerate(self._data):
+            stats += [[self._volname + '-' + str(i), np.mean(data), np.median(data), np.max(data), np.mean(data)/np.max(data), np.median(data)/np.max(data), np.std(data)/np.max(data), self._attr['Echo_Time']]]
+        self._data = self._data.astype(float)
+        self._data /= np.max(self._data)
+        self._data = utils.D3_equalize_adapthist(self._data, clip_limit=configuration.clip_limit, nbins=configuration.nbins)
+        stats += [[self._volname + '-total (preprocessed)', np.mean(self._data), np.median(self._data), np.max(self._data),
+                   np.mean(self._data) / np.max(self._data), np.median(self._data) / np.max(self._data),
+                   np.std(self._data) / np.max(self._data), self._attr['Echo_Time']]]
+        for i, data in enumerate(self._data):
+            stats += [[self._volname + '-' + str(i) + ' preprocessed', np.mean(data), np.median(data), np.max(data),
+                       np.mean(data) / np.max(data), np.median(data) / np.max(data), np.std(data) / np.max(data), self._attr['Echo_Time']]]
+        return stats
 
     def saveVolume(self, data, outputtype, filetype='h5'):
         if self._stepoutput:
@@ -224,6 +266,7 @@ class volume:
         self._attr['Width'] = width_array
         self._attr['Height'] = height_array
         self._attr['Depth'] = depth_array
+        self._attr['Echo_Time'] = reader.GetMetaData(1, '0018|0081').strip()
         self._attr['Patient Description'] = reader.GetMetaData(1, '0008|103e') if '0008|103e' in reader.GetMetaDataKeys(1) else 'No Description'
         self._attr['Patient Path'] = os.path.join(self._patient, self._imagetype)
         self._data = sitk.GetArrayFromImage(self._orig)
@@ -253,7 +296,7 @@ class volume:
         reader = sitk.ImageSeriesReader()
         dicom_names = reader.GetGDCMSeriesFileNames(dir)
         # Sort the dicom files
-        # dicom_names = self.filterRepeats(dicom_names)
+        dicom_names = self.filterRepeats(dicom_names)
         reader.SetFileNames(dicom_names)
         reader.MetaDataDictionaryArrayUpdateOn()
         reader.LoadPrivateTagsOn()
@@ -278,7 +321,8 @@ class volume:
 
     def preprocess(self, normalize='CLAHE', verbose=False, apply_curve_smoothing=False):
         # Normalize
-        ct_scan = self._data
+        ct_scan = self._data.astype(float)
+        ct_scan /= np.max(ct_scan)
         # ct_scan = self.resize(ct_scan)
         if normalize=='CLAHE':
             ct_scan = utils.D3_equalize_adapthist(ct_scan, clip_limit=configuration.clip_limit, nbins=configuration.nbins)
@@ -299,7 +343,7 @@ class volume:
         # print(f'{self._patient}: mean: {np.mean(ct_scan):.5f}, median: {np.median(ct_scan):.5f}, std: {np.std(ct_scan):.5f}')
         # print(f'{self._patient}: mean: {np.mean(ct_scan):.5f}, median: {np.median(ct_scan):.5f}, std: {np.std(ct_scan):.5f}')
         img = sitk.GetImageFromArray(ct_scan)
-        self.getAttributes(img)
+        self.setAttributes(img)
 
         if verbose:
             print('img', img.GetDimension(), img.GetDirection(), img.GetOrigin(), img.GetSpacing())
@@ -348,7 +392,7 @@ class volume:
         img.SetOrigin(self._attr['Origin'])
 
     def imgstats(self):
-        if self._verbose: print(f'{self._patient}: mean: {np.mean(self._data):.5f}, median: {np.median(self._data):.5f}, std: {np.std(self._data):.5f}')
+        if self._verbose: print(f'{self._patient}: mean: {np.mean(self._data):.5f}, median: {np.median(self._data):.5f}, std: {np.std(self._data):.5f}, max: {np.max(self._data):.5f}')
         return np.mean(self._data)
 
     def stats_hist(self):
@@ -478,17 +522,7 @@ class volume:
             self._clip[5] *= dim_orig[2] / configuration.standard_volume[0]
             self._clip = [int(i) for i in self._clip]
 
-            # crop = sitk.ExtractImageFilter()
-            # crop.SetSize([self._clip[1] - self._clip[0], self._clip[3] - self._clip[2], self._clip[5] - self._clip[4]])
-            # crop.SetIndex([self._clip[0], self._clip[2], self._clip[4]])
             clipped = self._orig[self._clip[0] : self._clip[1], self._clip[2] : self._clip[3], self._clip[4] : self._clip[5]]
-            # croppingBounds = [[self._clip[1], self._clip[3], self._clip[5]], [self._clip[0], self._clip[2], self._clip[4]]]
-            # print(croppingBounds)
-            # clipped = crop.Execute(self._orig, croppingBounds[0], croppingBounds[1])
-            # crop.SetLowerBoundaryCropSize([self._clip[0], self._clip[2], self._clip[4]])
-            # crop.SetUpperBoundaryCropSize([self._clip[1], self._clip[3], self._clip[5]])
-            # clipped = crop.Execute(self._orig)
-            # clipped = sitk.Crop(self._orig, [self._clip[0], self._clip[2], self._clip[4]], [self._clip[1], self._clip[3], self._clip[5]])
             self.setAttributes(clipped)
             self._attr['Clipped_Boundary'] = (self._clip[0], self._clip[1], self._clip[2], self._data[3], self._data[4], self._data[5])
 
@@ -516,16 +550,16 @@ class volume:
         self.saveVolume(self._data, 'output', 'mhd')
 
     def output(self):
-        return self._data, self._attr
+        return self
 
     def h5open(self):
         pass
 
 if __name__ == '__main__':
     data = dataset()
-    data.run()
+    data.stats()
     # data = volume('test')
-    # data.compile_folder('temp-unzip/1.2.840.4267.32.260456626265319904345675724263373644864/1.2.840.4267.32.258978919667629748006415331993516650574')
+    # data.compile_folder('temp-unzip/1.2.840.4267.32.316936701248529032407369277386144371677/1.2.840.4267.32.226789496748388476211964232698380117696')
     # data.run()
     print('Script complete. Exiting program now.')
     # data = volume('case12', '', True)
