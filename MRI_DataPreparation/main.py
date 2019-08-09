@@ -88,11 +88,15 @@ class dataset:
             data_array = vol._data
             group = h5.create_group(attrs['Patient Path'])
             pixeldata = group.create_dataset(attrs['Patient'], data=data_array)
+            pixeldata.attrs.create('Patient', attrs['Patient'].encode('ascii'))
+            pixeldata.attrs.create('StudyUID', attrs['StudyUID'].encode('ascii'))
+            pixeldata.attrs.create('SeriesUID', attrs['SeriesUID'].encode('ascii'))
+            pixeldata.attrs.create('Image_Type', attrs['Image_Type'].encode('ascii'))
+            pixeldata.attrs.create('SeriesNr', attrs['SeriesNr'])
             pixeldata.attrs.create('Age', attrs['Age'])
             pixeldata.attrs.create('Weight', attrs['Weight'])
             pixeldata.attrs.create('BMI', attrs['BMI'])
             pixeldata.attrs.create('Patient_Height', attrs['Patient_Height'])
-            pixeldata.attrs.create('SeriesNr', attrs['SeriesNr'])
             pixeldata.attrs.create('Size', attrs['Size'])
             pixeldata.attrs.create('Origin', attrs['Origin'])
             pixeldata.attrs.create('Spacing', attrs['Spacing'])
@@ -101,6 +105,8 @@ class dataset:
             pixeldata.attrs.create('Width', attrs['Width'])
             pixeldata.attrs.create('Height', attrs['Height'])
             pixeldata.attrs.create('Depth', attrs['Depth'])
+            pixeldata.attrs.create('Clipped_Pixel_Boundary', attrs['Clipped_Pixel_Boundary'])
+            pixeldata.attrs.create('Echo_Time', attrs['Echo_Time'])
 
 class patient:
 
@@ -116,10 +122,12 @@ class patient:
     def run(self):
         volumes = []
         for volume in self._volumes:
-            # volume.preprocess()
+            volume.preprocess()
             # volume.imgstats()
-            volumes.append(volume.run()) # for now
+            if volume.imgStats() > MEAN_THRESHOLD:
+                volume.run()
             # volume.stats_hist()
+            volumes.append(volume)
         return volumes
 
     def run_stats(self):
@@ -158,7 +166,7 @@ class patient:
 
 class volume:
 
-    def __init__(self, volname, patient='', imagetype='PRIMARY_OTHER', stepoutput=False, verbose=False, weightpath=r"C:\Users\Andrew Lu\Documents\Projects\MRI_Prostate_Segmentation\results\result_Prostate_D3_Segmentation_20190705-1805\weights-32.h5"):
+    def __init__(self, volname, patient='', imagetype='', stepoutput=False, verbose=False, weightpath=r"C:\Users\Andrew Lu\Documents\Projects\MRI_Prostate_Segmentation\results\result_Prostate_D3_Segmentation_20190705-1805\weights-32.h5"):
         self._weightpath = weightpath
         self._volname = volname
         self._imagetype = imagetype
@@ -173,12 +181,12 @@ class volume:
     #     self._data = utils.LoadFile(self._filename,normalize='CLAHE')
 
     def run(self):
-        self.preprocess()
+        # self.preprocess()
         self.modelConfig()
         self.predict()
         self.clip()
         self.postprocess()
-        return self.output()
+        # return self.output()
 
     def run_stats(self):
         stats = []
@@ -253,10 +261,13 @@ class volume:
         depth_array = self._orig.GetDepth()
         self._attr = {}
         self._attr['Patient'] = self._patient
+        self._attr['Image_Type'] = self._imagetype
         self._attr['Age'] = int(reader.GetMetaData(1, '0010|1010').strip()[:3]) if '0010|1010' in reader.GetMetaDataKeys(1) else -1
         self._attr['Weight'] = reader.GetMetaData(1, '0010|1030').strip() if '0010|1030' in reader.GetMetaDataKeys(1) else -1
         self._attr['Patient_Height'] = reader.GetMetaData(1, '0010|1020').strip() if '0010|1020' in reader.GetMetaDataKeys(1) else -1
         self._attr['BMI'] = self._attr['Weight'] / (self._attr['Patient_Height']/100)**2 if self._attr['Weight'] > 0 and self._attr['Patient_Height'] > 0 else -1
+        self._attr['StudyUID'] = reader.GetMetaData(1, '0020|000d')
+        self._attr['SeriesUID'] = reader.GetMetaData(1, '0020|000e')
         self._attr['SeriesNr'] = reader.GetMetaData(1, '0020|0011').strip() if '0020|1011' in reader.GetMetaDataKeys(1) else -1
         self._attr['Size'] = size_array
         self._attr['Spacing'] = spacing_array
@@ -266,11 +277,12 @@ class volume:
         self._attr['Width'] = width_array
         self._attr['Height'] = height_array
         self._attr['Depth'] = depth_array
-        self._attr['Echo_Time'] = reader.GetMetaData(1, '0018|0081').strip()
+        self._attr['Echo_Time'] = float(reader.GetMetaData(1, '0018|0081').strip())
         self._attr['Patient Description'] = reader.GetMetaData(1, '0008|103e') if '0008|103e' in reader.GetMetaDataKeys(1) else 'No Description'
         self._attr['Patient Path'] = os.path.join(self._patient, self._imagetype)
+        self._attr['Clipped_Pixel_Boundary'] = (0, self._attr['Width'], 0, self._attr['Height'], 0, self._attr['Depth'])
         self._data = sitk.GetArrayFromImage(self._orig)
-        self.saveVolume(self._data, 'original', 'h5')
+        # self.saveVolume(self._data, 'original', 'h5')
         self.saveVolume(self._data, 'original', 'mhd')
 
     def compile_mhd(self, filename):
@@ -380,7 +392,7 @@ class volume:
         # print(f'{self._patient}: mean: {np.mean(ct_scan):.5f}, median: {np.median(ct_scan):.5f}, std: {np.std(ct_scan):.5f}')
 
         self._data = ct_scan
-        self.saveVolume(self._data, 'preprocessed', 'h5')
+        # self.saveVolume(self._data, 'preprocessed', 'h5')
         self.saveVolume(self._data, 'preprocessed', 'mhd')
 
     def setAttributes(self, img):
@@ -391,11 +403,11 @@ class volume:
         img.SetSpacing(self._attr['Spacing'])
         img.SetOrigin(self._attr['Origin'])
 
-    def imgstats(self):
-        if self._verbose: print(f'{self._patient}: mean: {np.mean(self._data):.5f}, median: {np.median(self._data):.5f}, std: {np.std(self._data):.5f}, max: {np.max(self._data):.5f}')
+    def imgStats(self):
+        if self._verbose: print(f'{self._patient}-{self._imagetype}: mean: {np.mean(self._data):.5f}, median: {np.median(self._data):.5f}, std: {np.std(self._data):.5f}, max: {np.max(self._data):.5f}')
         return np.mean(self._data)
 
-    def stats_hist(self):
+    def statsHist(self):
         plt.subplot(131), plt.hist(self._data.flatten()/1000, range=(0,1)), plt.ylim(0,2000000), plt.title('original')
         plt.subplot(132), plt.hist(self.resize(self._data).flatten()/1000, range=(0,1)), plt.ylim(0,2000000), plt.title('Cropped')
         self.preprocess()
@@ -451,7 +463,7 @@ class volume:
         results = prelim[0]
         if self._verbose: print(results.shape)
         mask = utils.smooth_contours(utils.smooth_contours(results, type='CV2'))
-        self.saveVolume(mask, 'mask', 'h5')
+        # self.saveVolume(mask, 'mask', 'h5')
         self.saveVolume(mask, 'mask', 'mhd')
         # utils.multi_slice_viewer_legacy(mask.reshape(configuration.standard_volume),
         #                                 self._data.reshape(configuration.standard_volume))
@@ -524,12 +536,11 @@ class volume:
 
             clipped = self._orig[self._clip[0] : self._clip[1], self._clip[2] : self._clip[3], self._clip[4] : self._clip[5]]
             self.setAttributes(clipped)
-            self._attr['Clipped_Boundary'] = (self._clip[0], self._clip[1], self._clip[2], self._data[3], self._data[4], self._data[5])
 
             data = sitk.GetArrayFromImage(clipped)
             if data.size:
-                if self._verbose: print('Saving to .h5 file.')
-                self.saveVolume(data, 'clipped', 'h5')
+                if self._verbose: print('Saving to .mhd file.')
+                # self.saveVolume(data, 'clipped', 'h5')
                 self.saveVolume(data, 'clipped', 'mhd')
             else:
                 if self._verbose: print('No output file.')
@@ -537,6 +548,7 @@ class volume:
             # sitkimg = sitk.GetImageFromArray(self._data)
             # sitk.WriteImage(sitkimg, 'data.mhd')
             self._sitk = clipped
+        self._attr['Clipped_Pixel_Boundary'] = tuple(self._clip)
 
     def postprocess(self):
         new_Spacing = [old_sz * old_spc / new_sz for old_sz, old_spc, new_sz in
@@ -546,7 +558,7 @@ class volume:
                                 self._sitk.GetDirection(), 0.0, self._sitk.GetPixelIDValue())
         self.setAttributes(output_sitk)
         self._data = sitk.GetArrayFromImage(output_sitk)
-        self.saveVolume(self._data, 'output', 'h5')
+        # self.saveVolume(self._data, 'output', 'h5')
         self.saveVolume(self._data, 'output', 'mhd')
 
     def output(self):
@@ -557,7 +569,7 @@ class volume:
 
 if __name__ == '__main__':
     data = dataset()
-    data.stats()
+    data.run()
     # data = volume('test')
     # data.compile_folder('temp-unzip/1.2.840.4267.32.316936701248529032407369277386144371677/1.2.840.4267.32.226789496748388476211964232698380117696')
     # data.run()
