@@ -90,9 +90,9 @@ class dataset:
                         imagetype = vol.getImageType()
                         if imagetype not in h5:
                             h5[imagetype] = []
-                        h5[imagetype].append(vol._data)
+                        h5[imagetype].append((vol._data, vol.getLabel()))
         for key, value in h5.items():
-            dataset.outputData(h5py.File(key,'w'), h5[key])
+            dataset.outputData_end(h5py.File(key,'w'), [i[0] for i in h5[key]], [i[1] for i in h5[key]])
             value.close()
 
     def stats(self):
@@ -134,19 +134,13 @@ class dataset:
         pixeldata.attrs.create('Depth', attrs['Depth'])
         pixeldata.attrs.create('Clipped_Pixel_Boundary', attrs['Clipped_Pixel_Boundary'])
         pixeldata.attrs.create('Echo_Time', attrs['Echo_Time'])
-        AccessionID = attrs['Patient'].split('-')[1].lower()
-        if "n" in AccessionID:
-            label = 0
-        elif "c" in AccessionID:
-            label = 2
-        elif "wm" in AccessionID:
-            label = 2
-        elif "b" in AccessionID:
-            if AccessionID not in block_id:
-                label = 1
-            else:
-                label = 2
-        label_group.create_dataset(attrs['Patient'], data=label)
+        label_group.create_dataset(attrs['Patient'], data=vol.getLabel())
+
+    @classmethod
+    def outputData(cls, h5, imgs, labels):
+        h5.create_dataset('images', data=imgs)
+        h5.create_dataset('labels', data=labels)
+
 
 class patient:
 
@@ -445,6 +439,21 @@ class volume:
 
     def getImageType(self):
         return self._imagetype
+
+    def getLabel(self):
+        AccessionID = self._patient.split('-')[1].lower()
+        if "n" in AccessionID:
+            label = 0
+        elif "c" in AccessionID:
+            label = 2
+        elif "wm" in AccessionID:
+            label = 2
+        elif "b" in AccessionID:
+            if AccessionID not in block_id:
+                label = 1
+            else:
+                label = 2
+        return label
 
     def imgStats(self):
         if self._verbose: print(f'{self._patient}-{self._imagetype}: mean: {np.mean(self._data):.5f}, median: {np.median(self._data):.5f}, std: {np.std(self._data):.5f}, max: {np.max(self._data):.5f}')
