@@ -48,8 +48,9 @@ data_dir = 'MRI_DataPreparation/MRI_cases_test'
 output_size = [144,144,16]
 MEAN_THRESHOLD = 0.44
 
-with open("AS_blocklist.csv") as f:
-    block_id = f.read().lower().splitlines()
+block_id = []
+# with open("AS_blocklist.csv") as f:
+#     block_id = f.read().lower().splitlines()
 
 class dataset:
 
@@ -71,10 +72,27 @@ class dataset:
                         imagetype = vol.getImageType()
                         if imagetype not in h5:
                             h5[imagetype] = h5py.File(output_dir + '/' + imagetype + '.h5', 'w')
-                            img_group = h5[imagetype].create_group('images')
-                            label_group = h5[imagetype].create_group('labels')
-                        dataset.outputData(img_group, label_group, vols)
+                            h5[imagetype].create_group('images')
+                            h5[imagetype].create_group('labels')
+                        dataset.outputData(h5[imagetype], vol)
         for key, value in h5.items():
+            value.close()
+
+    def run_end(self):
+        h5 = {}
+        with open(self._jsonpath, 'r') as f:
+            metafile = json.load(f)
+            for i in range(len(metafile)):
+                data = patient(i, self._jsonpath, self._datapath, stepoutput=True, verbose=True)
+                vols = data.run()
+                if vols is not None:
+                    for vol in vols:
+                        imagetype = vol.getImageType()
+                        if imagetype not in h5:
+                            h5[imagetype] = []
+                        h5[imagetype].append(vol._data)
+        for key, value in h5.items():
+            dataset.outputData(h5py.File(key,'w'), h5[key])
             value.close()
 
     def stats(self):
@@ -91,9 +109,11 @@ class dataset:
         csv.to_csv('stats.csv')
 
     @classmethod
-    def outputData(cls, img_group, label_group, vol):
+    def outputData(cls, h5, vol):
         attrs = vol._attr
         data_array = vol._data
+        img_group = h5.get('images')
+        label_group = h5.get('labels')
         pixeldata = img_group.create_dataset(attrs['Patient'], data=data_array)
         pixeldata.attrs.create('Patient', attrs['Patient'].encode('ascii'))
         pixeldata.attrs.create('StudyUID', attrs['StudyUID'].encode('ascii'))
@@ -231,7 +251,7 @@ class volume:
             if os.path.exists(dir):
                 pass
             else:
-                os.mkdir(dir)
+                os.makedirs(dir)
             if filetype=='h5':
                 if self._verbose: print('Saving to ' + dir + '/' + filename + '.h5...')
                 h5f = h5py.File(dir + '/' + filename + '.h5', 'w')
