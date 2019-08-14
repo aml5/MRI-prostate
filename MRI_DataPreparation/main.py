@@ -48,6 +48,8 @@ data_dir = 'MRI_DataPreparation/MRI_cases_test'
 output_size = [144,144,16]
 MEAN_THRESHOLD = 0.44
 
+with open("AS_blocklist.csv") as f:
+    block_id = f.read().lower().splitlines()
 
 class dataset:
 
@@ -58,15 +60,22 @@ class dataset:
         self._jsonpath = jsonpath
 
     def run(self):
-        h5 = h5py.File('data.h5','w')
+        h5 = {}
         with open(self._jsonpath, 'r') as f:
             metafile = json.load(f)
             for i in range(len(metafile)):
                 data = patient(i, self._jsonpath, self._datapath, stepoutput=True, verbose=True)
                 vols = data.run()
                 if vols is not None:
-                    dataset.outputData(h5, vols)
-        h5.close()
+                    for vol in vols:
+                        imagetype = vol.getImageType()
+                        if imagetype not in h5:
+                            h5[imagetype] = h5py.File(output_dir + '/' + imagetype + '.h5', 'w')
+                            img_group = h5[imagetype].create_group('images')
+                            label_group = h5[imagetype].create_group('labels')
+                        dataset.outputData(img_group, label_group, vols)
+        for key, value in h5.items():
+            value.close()
 
     def stats(self):
         means = []
@@ -82,31 +91,42 @@ class dataset:
         csv.to_csv('stats.csv')
 
     @classmethod
-    def outputData(cls, h5, vols):
-        for vol in vols:
-            attrs = vol._attr
-            data_array = vol._data
-            group = h5.create_group(attrs['Patient Path'])
-            pixeldata = group.create_dataset(attrs['Patient'], data=data_array)
-            pixeldata.attrs.create('Patient', attrs['Patient'].encode('ascii'))
-            pixeldata.attrs.create('StudyUID', attrs['StudyUID'].encode('ascii'))
-            pixeldata.attrs.create('SeriesUID', attrs['SeriesUID'].encode('ascii'))
-            pixeldata.attrs.create('Image_Type', attrs['Image_Type'].encode('ascii'))
-            pixeldata.attrs.create('SeriesNr', attrs['SeriesNr'])
-            pixeldata.attrs.create('Age', attrs['Age'])
-            pixeldata.attrs.create('Weight', attrs['Weight'])
-            pixeldata.attrs.create('BMI', attrs['BMI'])
-            pixeldata.attrs.create('Patient_Height', attrs['Patient_Height'])
-            pixeldata.attrs.create('Size', attrs['Size'])
-            pixeldata.attrs.create('Origin', attrs['Origin'])
-            pixeldata.attrs.create('Spacing', attrs['Spacing'])
-            pixeldata.attrs.create('Direction', attrs['Direction'])
-            pixeldata.attrs.create('NumberOfComponentsPerPixel', attrs['NumberOfComponentsPerPixel'])
-            pixeldata.attrs.create('Width', attrs['Width'])
-            pixeldata.attrs.create('Height', attrs['Height'])
-            pixeldata.attrs.create('Depth', attrs['Depth'])
-            pixeldata.attrs.create('Clipped_Pixel_Boundary', attrs['Clipped_Pixel_Boundary'])
-            pixeldata.attrs.create('Echo_Time', attrs['Echo_Time'])
+    def outputData(cls, img_group, label_group, vol):
+        attrs = vol._attr
+        data_array = vol._data
+        pixeldata = img_group.create_dataset(attrs['Patient'], data=data_array)
+        pixeldata.attrs.create('Patient', attrs['Patient'].encode('ascii'))
+        pixeldata.attrs.create('StudyUID', attrs['StudyUID'].encode('ascii'))
+        pixeldata.attrs.create('SeriesUID', attrs['SeriesUID'].encode('ascii'))
+        pixeldata.attrs.create('Image_Type', attrs['Image_Type'].encode('ascii'))
+        pixeldata.attrs.create('SeriesNr', attrs['SeriesNr'])
+        pixeldata.attrs.create('Age', attrs['Age'])
+        pixeldata.attrs.create('Weight', attrs['Weight'])
+        pixeldata.attrs.create('BMI', attrs['BMI'])
+        pixeldata.attrs.create('Patient_Height', attrs['Patient_Height'])
+        pixeldata.attrs.create('Size', attrs['Size'])
+        pixeldata.attrs.create('Origin', attrs['Origin'])
+        pixeldata.attrs.create('Spacing', attrs['Spacing'])
+        pixeldata.attrs.create('Direction', attrs['Direction'])
+        pixeldata.attrs.create('NumberOfComponentsPerPixel', attrs['NumberOfComponentsPerPixel'])
+        pixeldata.attrs.create('Width', attrs['Width'])
+        pixeldata.attrs.create('Height', attrs['Height'])
+        pixeldata.attrs.create('Depth', attrs['Depth'])
+        pixeldata.attrs.create('Clipped_Pixel_Boundary', attrs['Clipped_Pixel_Boundary'])
+        pixeldata.attrs.create('Echo_Time', attrs['Echo_Time'])
+        AccessionID = attrs['Patient'].split('-')[1].lower()
+        if "n" in AccessionID:
+            label = 0
+        elif "c" in AccessionID:
+            label = 2
+        elif "wm" in AccessionID:
+            label = 2
+        elif "b" in AccessionID:
+            if AccessionID not in block_id:
+                label = 1
+            else:
+                label = 2
+        label_group.create_dataset(attrs['Patient'], data=label)
 
 class patient:
 
@@ -402,6 +422,9 @@ class volume:
     def getAttributes(self, img):
         img.SetSpacing(self._attr['Spacing'])
         img.SetOrigin(self._attr['Origin'])
+
+    def getImageType(self):
+        return self._imagetype
 
     def imgStats(self):
         if self._verbose: print(f'{self._patient}-{self._imagetype}: mean: {np.mean(self._data):.5f}, median: {np.median(self._data):.5f}, std: {np.std(self._data):.5f}, max: {np.max(self._data):.5f}')
