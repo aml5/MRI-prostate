@@ -92,8 +92,7 @@ class dataset:
                             h5[imagetype] = []
                         h5[imagetype].append((vol._data, vol.getLabel()))
         for key, value in h5.items():
-            dataset.outputData_end(h5py.File(key,'w'), [i[0] for i in h5[key]], [i[1] for i in h5[key]])
-            value.close()
+            dataset.outputData_end(h5py.File(output_dir + '/' + key + '.h5','w'), [i[0] for i in h5[key]], [i[1] for i in h5[key]])
 
     def stats(self):
         means = []
@@ -137,7 +136,7 @@ class dataset:
         label_group.create_dataset(attrs['Patient'], data=vol.getLabel())
 
     @classmethod
-    def outputData(cls, h5, imgs, labels):
+    def outputData_end(cls, h5, imgs, labels):
         h5.create_dataset('images', data=imgs)
         h5.create_dataset('labels', data=labels)
 
@@ -158,7 +157,7 @@ class patient:
         for volume in self._volumes:
             volume.preprocess()
             # volume.imgstats()
-            if volume.imgStats() > MEAN_THRESHOLD:
+            if volume._imagetype == 'PRIMARY_OTHER':
                 volume.run()
             # volume.stats_hist()
             volumes.append(volume)
@@ -621,7 +620,7 @@ class volume:
 
 if __name__ == '__main__':
     data = dataset()
-    data.run()
+    data.run_end()
     # data = volume('test')
     # data.compile_folder('temp-unzip/1.2.840.4267.32.316936701248529032407369277386144371677/1.2.840.4267.32.226789496748388476211964232698380117696')
     # data.run()
