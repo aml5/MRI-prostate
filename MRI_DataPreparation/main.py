@@ -155,10 +155,7 @@ class patient:
     def run(self):
         volumes = []
         for volume in self._volumes:
-            volume.preprocess()
-            # volume.imgstats()
-            if volume._imagetype == 'PRIMARY_OTHER':
-                volume.run()
+            volume.run()
             # volume.stats_hist()
             volumes.append(volume)
         return volumes
@@ -214,11 +211,14 @@ class volume:
     #     self._data = utils.LoadFile(self._filename,normalize='CLAHE')
 
     def run(self):
-        # self.preprocess()
-        self.modelConfig()
-        self.predict()
-        self.clip()
-        self.postprocess()
+        self.preprocess()
+        if volume._imagetype == 'PRIMARY_OTHER':
+            self.modelConfig()
+            self.predict()
+            self.clip()
+            self.postprocess()
+        elif self._data.dtype == 'float64':
+            self._data = self._data.astype(np.float16)
         # return self.output()
 
     def run_stats(self):
