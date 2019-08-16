@@ -157,16 +157,41 @@ class dataset:
                 test_imgs.append(imgs[i])
                 test_labels.append(labels[i])
                 test_attrs.append(attrs[i])
-        h5.create_dataset('train_img', data=train_imgs)
-        h5.create_dataset('train_labels', data=train_labels)
-        h5.create_dataset('train_attrs', data=train_attrs)
-        h5.create_dataset('val_img', data=val_imgs)
-        h5.create_dataset('val_labels', data=val_labels)
-        h5.create_dataset('val_attrs', data=val_attrs)
-        h5.create_dataset('test_img', data=test_imgs)
-        h5.create_dataset('test_labels', data=test_labels)
-        h5.create_dataset('test_attrs', data=test_attrs)
-
+        if len(train_imgs) > 0:
+            train = h5.create_dataset('train_img', data=train_imgs)
+            dataset.saveAttrs(train)
+            h5.create_dataset('train_labels', data=train_labels)
+            # h5.create_dataset('train_attrs', data=train_attrs)
+        if len(val_imgs) > 0:
+            val = h5.create_dataset('val_img', data=val_imgs)
+            dataset.saveAttrs(val)
+            h5.create_dataset('val_labels', data=val_labels)
+            # h5.create_dataset('val_attrs', data=val_attrs)
+        if len(test_imgs) > 0:
+            test = h5.create_dataset('test_img', data=test_imgs)
+            dataset.saveAttrs(test)
+            h5.create_dataset('test_labels', data=test_labels)
+    @classmethod
+    def saveAttrs(cls, dataset, attrs):
+        dataset.attrs.create('Patient', [attr['Patient'].encode('ascii') for attr in attrs])
+        dataset.attrs.create('StudyUID', [attr['StudyUID'].encode('ascii') for attr in attrs])
+        dataset.attrs.create('SeriesUID', [attr['SeriesUID'].encode('ascii') for attr in attrs])
+        dataset.attrs.create('Image_Type', [attr['Image_Type'].encode('ascii') for attr in attrs])
+        dataset.attrs.create('SeriesNr', [attr['SeriesNr'] for attr in attrs])
+        dataset.attrs.create('Age', [attr['Age'] for attr in attrs])
+        dataset.attrs.create('Weight', [attr['Weight'] for attr in attrs])
+        dataset.attrs.create('BMI', [attr['BMI'] for attr in attrs])
+        dataset.attrs.create('Patient_Height', [attr['Patient_Height'] for attr in attrs])
+        dataset.attrs.create('Size', [attr['Size'] for attr in attrs])
+        dataset.attrs.create('Origin', [attr['Origin'] for attr in attrs])
+        dataset.attrs.create('Spacing', [attr['Spacing'] for attr in attrs])
+        dataset.attrs.create('Direction', [attr['Direction'] for attr in attrs])
+        dataset.attrs.create('NumberOfComponentsPerPixel', [attr['NumberOfComponentsPerPixel'] for attr in attrs])
+        dataset.attrs.create('Width', [attr['Width'] for attr in attrs])
+        dataset.attrs.create('Height', [attr['Height'] for attr in attrs])
+        dataset.attrs.create('Depth', [attr['Depth'] for attr in attrs])
+        dataset.attrs.create('Clipped_Pixel_Boundary', [attr['Clipped_Pixel_Boundary'] for attr in attrs])
+        dataset.attrs.create('Echo_Time', [attr['Echo_Time'] for attr in attrs])
 
 class patient:
 
@@ -546,7 +571,10 @@ class volume:
         # utils.multi_slice_viewer_legacy(mask.reshape(configuration.standard_volume),
         #                                 self._data.reshape(configuration.standard_volume))
         # plt.show()
-        self.findBorder(mask)
+        if self.isEmpty(mask):
+            self._clip = None
+        else:
+            self.findBorder(mask)
 
     def findBorder(self, mask):
         clip = [384, 0, 384, 0, 0, 300]
@@ -567,10 +595,7 @@ class volume:
                     if clip[1] < j: clip[1] = j
                     if clip[2] > i: clip[2] = i
                     if clip[3] < i: clip[3] = i
-        if not clip == [384, 0, 384, 0, 0, 300]:
-            self._clip = clip
-        else:
-            self._clip = None
+        self._clip = clip
 
     def isEmpty(self, slice):
         if (np.count_nonzero(slice) == 0):
@@ -629,15 +654,16 @@ class volume:
         self._attr['Clipped_Pixel_Boundary'] = tuple(self._clip)
 
     def postprocess(self):
-        new_Spacing = [old_sz * old_spc / new_sz for old_sz, old_spc, new_sz in
-                       zip(self._sitk.GetSize(), self._sitk.GetSpacing(), output_size)]
-        output_sitk = sitk.Resample(self._sitk, output_size, sitk.Transform(),
-                                sitk.sitkLanczosWindowedSinc, self._sitk.GetOrigin(), new_Spacing,
-                                self._sitk.GetDirection(), 0.0, self._sitk.GetPixelIDValue())
-        self.setAttributes(output_sitk)
-        self._data = sitk.GetArrayFromImage(output_sitk)
-        # self.saveVolume(self._data, 'output', 'h5')
-        self.saveVolume(self._data, 'output', 'mhd')
+        if self._clip:
+            new_Spacing = [old_sz * old_spc / new_sz for old_sz, old_spc, new_sz in
+                           zip(self._sitk.GetSize(), self._sitk.GetSpacing(), output_size)]
+            output_sitk = sitk.Resample(self._sitk, output_size, sitk.Transform(),
+                                    sitk.sitkLanczosWindowedSinc, self._sitk.GetOrigin(), new_Spacing,
+                                    self._sitk.GetDirection(), 0.0, self._sitk.GetPixelIDValue())
+            self.setAttributes(output_sitk)
+            self._data = sitk.GetArrayFromImage(output_sitk)
+            # self.saveVolume(self._data, 'output', 'h5')
+            self.saveVolume(self._data, 'output', 'mhd')
 
     def output(self):
         return self
