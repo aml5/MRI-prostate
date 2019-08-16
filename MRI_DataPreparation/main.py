@@ -35,6 +35,7 @@ import pydicom
 import tarfile
 import h5py
 import pandas as pd
+import random
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
 os.environ["CUDA_VISIBLE_DEVICES"]= configuration.initial_gpu
 from keras.backend.tensorflow_backend import set_session
@@ -45,8 +46,10 @@ set_session(tf.Session(config=config))
 output_dir = 'MRI_DataPreparation/output'
 json_filepath = 'MRI_DataPreparation/data/StudyCohort_cut.json'
 data_dir = 'MRI_DataPreparation/MRI_cases_test'
+weight_path = r"C:\Users\Andrew Lu\Documents\Projects\MRI_Prostate_Segmentation\results\result_Prostate_D3_Segmentation_20190705-1805\weights-32.h5"
 output_size = [144,144,16]
 MEAN_THRESHOLD = 0.44
+data_split = [.7, .2, .1]
 
 block_id = []
 # with open("AS_blocklist.csv") as f:
@@ -78,7 +81,7 @@ class dataset:
         for key, value in h5.items():
             value.close()
 
-    def run_end(self):
+    def runPath(self):
         h5 = {}
         with open(self._jsonpath, 'r') as f:
             metafile = json.load(f)
@@ -90,9 +93,9 @@ class dataset:
                         imagetype = vol.getImageType()
                         if imagetype not in h5:
                             h5[imagetype] = []
-                        h5[imagetype].append((vol._data, vol.getLabel()))
+                        h5[imagetype].append((vol._data, vol.getLabel(), vol._attr))
         for key, value in h5.items():
-            dataset.outputData_end(h5py.File(output_dir + '/' + key + '.h5','w'), [i[0] for i in h5[key]], [i[1] for i in h5[key]])
+            dataset.outputDataPath(h5py.File(output_dir + '/' + key + '.h5','w'), [i[0] for i in h5[key]], [i[1] for i in h5[key]], [i[2] for i in h5[key]])
 
     def stats(self):
         means = []
@@ -136,9 +139,33 @@ class dataset:
         label_group.create_dataset(attrs['Patient'], data=vol.getLabel())
 
     @classmethod
-    def outputData_end(cls, h5, imgs, labels):
-        h5.create_dataset('images', data=imgs)
-        h5.create_dataset('labels', data=labels)
+    def outputDataPath(cls, h5, imgs, labels, attrs):
+        train_imgs, train_labels, train_attrs = [], [], []
+        val_imgs, val_labels, val_attrs = [], [], []
+        test_imgs, test_labels, test_attrs = [], [], []
+        rand = random.random()
+        for i in range(len(imgs)):
+            if rand < data_split[0]:
+                train_imgs.append(imgs[i])
+                train_labels.append(labels[i])
+                train_attrs.append(attrs[i])
+            elif rand < data_split[0] + data_split[1] and rand > data_split[0]:
+                val_imgs.append(imgs[i])
+                val_labels.append(labels[i])
+                val_attrs.append(attrs[i])
+            elif rand > 1 - data_split[2]:
+                test_imgs.append(imgs[i])
+                test_labels.append(labels[i])
+                test_attrs.append(attrs[i])
+        h5.create_dataset('train_img', data=train_imgs)
+        h5.create_dataset('train_labels', data=train_labels)
+        h5.create_dataset('train_attrs', data=train_attrs)
+        h5.create_dataset('val_img', data=val_imgs)
+        h5.create_dataset('val_labels', data=val_labels)
+        h5.create_dataset('val_attrs', data=val_attrs)
+        h5.create_dataset('test_img', data=test_imgs)
+        h5.create_dataset('test_labels', data=test_labels)
+        h5.create_dataset('test_attrs', data=test_attrs)
 
 
 class patient:
@@ -196,7 +223,7 @@ class patient:
 
 class volume:
 
-    def __init__(self, volname, patient='', imagetype='', stepoutput=False, verbose=False, weightpath=r"C:\Users\Andrew Lu\Documents\Projects\MRI_Prostate_Segmentation\results\result_Prostate_D3_Segmentation_20190705-1805\weights-32.h5"):
+    def __init__(self, volname, patient='', imagetype='', stepoutput=False, verbose=False, weightpath=weight_path):
         self._weightpath = weightpath
         self._volname = volname
         self._imagetype = imagetype
@@ -212,7 +239,7 @@ class volume:
 
     def run(self):
         self.preprocess()
-        if volume._imagetype == 'PRIMARY_OTHER':
+        if self._imagetype == 'PRIMARY_OTHER':
             self.modelConfig()
             self.predict()
             self.clip()
@@ -618,9 +645,44 @@ class volume:
     def h5open(self):
         pass
 
+def parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--output_dir',
+        default = output_dir,
+        help = 'directory where h5 files are to be stored'
+    )
+    parser.add_argument(
+        '--json_path',
+        default = json_filepath,
+        help = 'path of Study Cohort json file'
+    )
+    parser.add_argument(
+        '--data_dir',
+        default = data_dir,
+        help = 'directory where tgz files are stored'
+    )
+    parser.add_argument(
+        '--weight_path',
+        default = weight_path,
+        help = 'path of model weight',
+    )
+    parser.add_argument(
+        '--data_split',
+        default = data_split,
+        nargs = 3,
+        help = 'split for training, validation, and test sets in decimal form'
+    )
+    args = parser.parse_args()
+    output_dir = args.output_dir
+    json_filepath = args.json_filepath
+    data_dir = args.data_dir
+    weight_path = args.weight_path
+    data_split = args.data_split
+
 if __name__ == '__main__':
     data = dataset()
-    data.run_end()
+    data.runPath()
     # data = volume('test')
     # data.compile_folder('temp-unzip/1.2.840.4267.32.316936701248529032407369277386144371677/1.2.840.4267.32.226789496748388476211964232698380117696')
     # data.run()
