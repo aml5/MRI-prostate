@@ -43,11 +43,14 @@ config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 set_session(tf.Session(config=config))
 
+
+
 output_dir = 'MRI_DataPreparation/output'
 json_filepath = 'MRI_DataPreparation/data/StudyCohort_cut.json'
 data_dir = 'MRI_DataPreparation/MRI_cases_test'
 weight_path = r"C:\Users\Andrew Lu\Documents\Projects\MRI_Prostate_Segmentation\results\result_Prostate_D3_Segmentation_20190705-1805\weights-32.h5"
 output_size = [144,144,16]
+output_size_zyx = (output_size[2],output_size[1],output_size[0])
 MEAN_THRESHOLD = 0.44
 data_split = [.7, .2, .1]
 
@@ -93,7 +96,18 @@ class dataset:
                         imagetype = vol.getImageType()
                         if imagetype not in h5:
                             h5[imagetype] = []
-                        h5[imagetype].append((vol._data, vol.getLabel(), vol._attr))
+                            print(f'New h5[{imagetype}] ')
+                        if vol._attr['Image_Type'] == 'PRIMARY_OTHER':
+                            if vol._data.shape == output_size_zyx:
+                                h5[imagetype].append((vol._data, vol.getLabel(), vol._attr))
+                                print(f'Add volume to h5[{imagetype}], shape:{vol._data.shape}')
+                            else:
+                                print(f'Skip adding volume to h5[{imagetype}],wrong shape {vol._data.shape}')
+                        else:
+                            h5[imagetype].append((vol._data, vol.getLabel(), vol._attr))
+                            print(f'Add volume to h5[{imagetype}], shape:{vol._data.shape}')
+                        # print('shape:',vol._data.shape)
+                        #     h5[imagetype].append((vol._data, vol.getLabel(), vol._attr))
         for key, value in h5.items():
             dataset.outputDataPath(h5py.File(output_dir + '/' + key + '.h5','w'), [i[0] for i in h5[key]], [i[1] for i in h5[key]], [i[2] for i in h5[key]])
 
@@ -143,34 +157,60 @@ class dataset:
         train_imgs, train_labels, train_attrs = [], [], []
         val_imgs, val_labels, val_attrs = [], [], []
         test_imgs, test_labels, test_attrs = [], [], []
-        rand = random.random()
-        for i in range(len(imgs)):
-            if rand < data_split[0]:
-                train_imgs.append(imgs[i])
-                train_labels.append(labels[i])
-                train_attrs.append(attrs[i])
-            elif rand < data_split[0] + data_split[1] and rand > data_split[0]:
-                val_imgs.append(imgs[i])
-                val_labels.append(labels[i])
-                val_attrs.append(attrs[i])
-            elif rand > 1 - data_split[2]:
-                test_imgs.append(imgs[i])
-                test_labels.append(labels[i])
-                test_attrs.append(attrs[i])
+
+        from random import shuffle
+        x = [i for i in range(len(imgs))]
+        shuffle(x)
+
+        n_train = int(round(data_split[0] * len(imgs)))
+        n_val = int(round(data_split[1] * len(imgs)))
+        n_test = int(round(data_split[2] * len(imgs)))
+
+        for i in x[:n_train]:
+            train_imgs.append(imgs[i])
+            train_labels.append(labels[i])
+            train_attrs.append(attrs[i])
+
+        for i in x[n_train: n_train+n_val]:
+            val_imgs.append(imgs[i])
+            val_labels.append(labels[i])
+            val_attrs.append(attrs[i])
+
+        for i in x[len(x)-n_test:]:
+            test_imgs.append(imgs[i])
+            test_labels.append(labels[i])
+            test_attrs.append(attrs[i])
+
+        # for i in range(len(imgs)):
+        #     rand = random.random()
+        #     if rand < data_split[0]:
+        #         train_imgs.append(imgs[i])
+        #         train_labels.append(labels[i])
+        #         train_attrs.append(attrs[i])
+        #     elif rand < data_split[0] + data_split[1] and rand > data_split[0]:
+        #         val_imgs.append(imgs[i])
+        #         val_labels.append(labels[i])
+        #         val_attrs.append(attrs[i])
+        #     elif rand > 1 - data_split[2]:
+        #         test_imgs.append(imgs[i])
+        #         test_labels.append(labels[i])
+        #         test_attrs.append(attrs[i])
+
         if len(train_imgs) > 0:
             train = h5.create_dataset('train_img', data=train_imgs)
-            dataset.saveAttrs(train)
+            dataset.saveAttrs(train, train_attrs)
             h5.create_dataset('train_labels', data=train_labels)
             # h5.create_dataset('train_attrs', data=train_attrs)
         if len(val_imgs) > 0:
             val = h5.create_dataset('val_img', data=val_imgs)
-            dataset.saveAttrs(val)
+            dataset.saveAttrs(val, val_attrs)
             h5.create_dataset('val_labels', data=val_labels)
             # h5.create_dataset('val_attrs', data=val_attrs)
         if len(test_imgs) > 0:
             test = h5.create_dataset('test_img', data=test_imgs)
-            dataset.saveAttrs(test)
+            dataset.saveAttrs(test, test_attrs)
             h5.create_dataset('test_labels', data=test_labels)
+
     @classmethod
     def saveAttrs(cls, dataset, attrs):
         dataset.attrs.create('Patient', [attr['Patient'].encode('ascii') for attr in attrs])
@@ -225,18 +265,22 @@ class patient:
         # wrapper, filename + (data -> AccessionID, Folder, FileList)
 
     def createData(self):
-        self._volumes = np.array([])
+        #self._volumes = np.array([])
+        self._volumes = []
         tgzpath = os.path.join(self._datapath, os.path.basename(self._jsondata["filename"]))
         if self._verbose: print('Entering tgz directory: ' + tgzpath)
         if os.path.exists(tgzpath):
             with tarfile.open(tgzpath) as f:
                 for i, fileset in enumerate(self._jsondata["data"]["FileList"]):
                     # if (self._jsondata['data']['ImageType'][i] == 'PRIMARY_OTHER'):
-                    if self._verbose: print('PRIMARY_OTHER type images found.')
-                    tmp = volume(os.path.splitext(os.path.basename(tgzpath))[0] + '-' + self._jsondata['data']['ImageType'][i], os.path.splitext(os.path.basename(tgzpath))[0], self._jsondata['data']['ImageType'][i], stepoutput=self._stepoutput, verbose=self._verbose)
+                    #if self._verbose: print('PRIMARY_OTHER type images found.')
+                    tmp = volume(os.path.splitext(os.path.basename(tgzpath))[0] + '-' + self._jsondata['data']['ImageType'][i], os.path.splitext(os.path.basename(tgzpath))[0], self._jsondata['data']['ImageType'][i],
+                                 stepoutput=self._stepoutput, weightpath=weight_path, verbose=self._verbose)
                     tmp.compile(fileset, f)
                     # if tmp.imgstats() > MEAN_THRESHOLD:
-                    self._volumes = np.append(self._volumes, tmp)
+
+                    #self._volumes = np.append(self._volumes, tmp)
+                    self._volumes.append(tmp)
                     # else:
                     #     if self._verbose: print(f'Non-T2 image removed.')
                     # except NotImplementedError:
@@ -304,14 +348,14 @@ class volume:
                 data.attrs.create('Spacing', self._attr['Spacing'])
                 data.attrs.create('Origin', self._attr['Origin'])
                 h5f.close()
-                if self._verbose: print('Volume saved. \n ----------')
+
             if filetype=='mhd':
                 if self._verbose: print('Saving to ' + dir + '/' + filename + '.mhd...')
                 sitkimg = sitk.GetImageFromArray(data)
                 sitkimg.SetSpacing(self._attr["Spacing"])
                 sitkimg.SetOrigin(self._attr["Origin"])
                 sitk.WriteImage(sitkimg, dir + '/' + filename + '.mhd')
-                if self._verbose: print('Volume saved. \n ----------')
+
             if filetype=='txt':
                 text = open(dir + '/' + filename + '.txt', 'w')
                 text.write('Image is empty.')
@@ -460,7 +504,7 @@ class volume:
                                 img.GetDirection(), 0.0, img.GetPixelIDValue())
 
         if apply_curve_smoothing:
-            ct_scan = utils.smooth_images(ct_scan)
+            new_img = utils.smooth_images(new_img)
             print('apply_curve_smoothing')
 
         self.setAttributes(new_img)
@@ -561,20 +605,21 @@ class volume:
         self.load()
         if self._verbose: print('Running prediction...')
         predict_set = np.vstack((self._data, self._zeros))  # np.load(self._filename)
+        self._data = self._data.reshape(configuration.standard_volume)
         predict_set = predict_set.reshape(*predict_set.shape, 1)
         prelim = self._model.predict(predict_set)[-1]
         results = prelim[0]
         if self._verbose: print(results.shape)
-        mask = utils.smooth_contours(utils.smooth_contours(results, type='CV2'))
+        self._mask = utils.smooth_contours(utils.smooth_contours(results, type='CV2'))
         # self.saveVolume(mask, 'mask', 'h5')
-        self.saveVolume(mask, 'mask', 'mhd')
+        self.saveVolume(self._mask, 'mask', 'mhd')
         # utils.multi_slice_viewer_legacy(mask.reshape(configuration.standard_volume),
         #                                 self._data.reshape(configuration.standard_volume))
         # plt.show()
-        if self.isEmpty(mask):
+        if self.isEmpty(self._mask):
             self._clip = None
         else:
-            self.findBorder(mask)
+            self.findBorder(self._mask)
 
     def findBorder(self, mask):
         clip = [384, 0, 384, 0, 0, 300]
@@ -613,7 +658,6 @@ class volume:
 
     def clip(self):
         if self._clip is not None:
-            self._data = self._data.reshape(configuration.standard_volume)
             dim_orig = self._orig.GetSize()
             comp_factor = 0.05
             x_len = self._clip[1] - self._clip[0]
@@ -651,7 +695,7 @@ class volume:
             # sitkimg = sitk.GetImageFromArray(self._data)
             # sitk.WriteImage(sitkimg, 'data.mhd')
             self._sitk = clipped
-        self._attr['Clipped_Pixel_Boundary'] = tuple(self._clip)
+            self._attr['Clipped_Pixel_Boundary'] = tuple(self._clip)
 
     def postprocess(self):
         if self._clip:
@@ -671,43 +715,51 @@ class volume:
     def h5open(self):
         pass
 
-def parser():
+def argsparser():
+    global output_dir
+    global json_filepath
+    global data_dir
+    global weight_path
+    global data_split
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--output_dir',
+        '-o', '--output_dir',
         default = output_dir,
         help = 'directory where h5 files are to be stored'
     )
     parser.add_argument(
-        '--json_path',
+        '-j', '--json_path',
         default = json_filepath,
         help = 'path of Study Cohort json file'
     )
     parser.add_argument(
-        '--data_dir',
+        '-d', '--data_dir',
         default = data_dir,
         help = 'directory where tgz files are stored'
     )
     parser.add_argument(
-        '--weight_path',
+        '-w', '--weight_path',
         default = weight_path,
         help = 'path of model weight',
     )
     parser.add_argument(
-        '--data_split',
+        '-s', '--data_split',
         default = data_split,
         nargs = 3,
         help = 'split for training, validation, and test sets in decimal form'
     )
     args = parser.parse_args()
+
     output_dir = args.output_dir
-    json_filepath = args.json_filepath
+    json_filepath = args.json_path
     data_dir = args.data_dir
     weight_path = args.weight_path
     data_split = args.data_split
 
 if __name__ == '__main__':
-    data = dataset()
+    argsparser()
+    data = dataset(jsonpath=json_filepath, datapath=data_dir)
     data.runPath()
     # data = volume('test')
     # data.compile_folder('temp-unzip/1.2.840.4267.32.316936701248529032407369277386144371677/1.2.840.4267.32.226789496748388476211964232698380117696')
@@ -718,3 +770,4 @@ if __name__ == '__main__':
     # data.preprocess()
     # # data.stats_hist()
     # data.run()
+    exit(0)
