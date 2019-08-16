@@ -11,11 +11,22 @@ class multipatient:
         self._imagetype = imagetype
         self._filetype = filetype
 
+    def view(self):
+        dirs = os.listdir(self._parentpath)
+        for dir in dirs:
+            volume = slices(self._parentpath, dir, dir + '-' + self._imagetype, self._filetype)
+            try:
+                volume.readFiles()
+                volume.viewSlices()
+            except:
+                pass
+
+
 class slices:
 
     def __init__(self, parentpath, patient, volname, filetype):
         self._patient = patient
-        if volname == 'same': volname = f'{patient}-PRIMARY_OTHER'
+        if volname == 'same': volname = f'{patient}-T2_Ax'
         self._imgpath = f'{parentpath}/{patient}/{volname}-preprocessed.{filetype}'
         self._maskpath = f'{parentpath}/{patient}/{volname}-mask.{filetype}'
 
@@ -30,6 +41,5 @@ class slices:
         plt.show()
 
 if __name__ == '__main__':
-    display = slices(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])
-    display.readFiles()
-    display.viewSlices()
+    display = multipatient(sys.argv[1], sys.argv[2], sys.argv[3])
+    display.view()

@@ -43,28 +43,28 @@ config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 set_session(tf.Session(config=config))
 
-
-
 output_dir = 'MRI_DataPreparation/output'
-json_filepath = 'MRI_DataPreparation/data/StudyCohort_cut.json'
+json_filepath = 'MRI_DataPreparation/data/StudyCohort_prostate_mri_v4.json'
 data_dir = 'MRI_DataPreparation/MRI_cases_test'
 weight_path = r"C:\Users\Andrew Lu\Documents\Projects\MRI_Prostate_Segmentation\results\result_Prostate_D3_Segmentation_20190705-1805\weights-32.h5"
+step_output = False
 output_size = [144,144,16]
 output_size_zyx = (output_size[2],output_size[1],output_size[0])
 MEAN_THRESHOLD = 0.44
 data_split = [.7, .2, .1]
-
-block_id = []
-# with open("AS_blocklist.csv") as f:
-#     block_id = f.read().lower().splitlines()
+image_types_T2 = ['T2_Ax', 'DIXON_INPHASE']
+image_types_secondary = ['ADC']
+no_mask = []
 
 class dataset:
 
     def __init__(self,
                  jsonpath=json_filepath,
-                 datapath=data_dir):
+                 datapath=data_dir,
+                 stepoutput=step_output):
         self._datapath = datapath
         self._jsonpath = jsonpath
+        self._stepoutput = stepoutput
 
     def run(self):
         h5 = {}
@@ -88,28 +88,29 @@ class dataset:
         h5 = {}
         with open(self._jsonpath, 'r') as f:
             metafile = json.load(f)
-            for i in range(len(metafile)):
-                data = patient(i, self._jsonpath, self._datapath, stepoutput=True, verbose=True)
+            for patientID, patient_data in metafile.items():
+                data = patient(patientID, patient_data, self._datapath, stepoutput=self._stepoutput, verbose=True)
                 vols = data.run()
                 if vols is not None:
                     for vol in vols:
                         imagetype = vol.getImageType()
-                        if imagetype not in h5:
+                        if imagetype not in h5 and imagetype in [*image_types_T2, *image_types_secondary]:
                             h5[imagetype] = []
                             print(f'New h5[{imagetype}] ')
-                        if vol._attr['Image_Type'] == 'PRIMARY_OTHER':
+                        if vol._attr['Image_Type'] in image_types_T2:
                             if vol._data.shape == output_size_zyx:
-                                h5[imagetype].append((vol._data, vol.getLabel(), vol._attr))
-                                print(f'Add volume to h5[{imagetype}], shape:{vol._data.shape}')
+                                h5[imagetype].append((vol._data, vol.getCategory(), vol._attr))
+                                print(f'Add volume to h5[{imagetype}], shape:{vol._data.shape}, volume:{len(h5[imagetype])-1}')
                             else:
-                                print(f'Skip adding volume to h5[{imagetype}],wrong shape {vol._data.shape}')
-                        else:
-                            h5[imagetype].append((vol._data, vol.getLabel(), vol._attr))
-                            print(f'Add volume to h5[{imagetype}], shape:{vol._data.shape}')
+                                print(f'Skip adding volume to h5[{imagetype}], wrong shape {vol._data.shape}')
+                        elif vol._attr['Image_Type'] in image_types_secondary:
+                            h5[imagetype].append((vol._data, vol.getCategory(), vol._attr))
+                            print(f'Add volume to h5[{imagetype}], shape:{vol._data.shape}, volume:{len(h5[imagetype])-1}')
                         # print('shape:',vol._data.shape)
-                        #     h5[imagetype].append((vol._data, vol.getLabel(), vol._attr))
+                        #     h5[imagetype].append((vol._data, vol.getCategory(), vol._attr))
         for key, value in h5.items():
-            dataset.outputDataPath(h5py.File(output_dir + '/' + key + '.h5','w'), [i[0] for i in h5[key]], [i[1] for i in h5[key]], [i[2] for i in h5[key]])
+            dataset.outputDataPath(h5py.File(output_dir + '/' + key + '.h5','w'), [i[0] for i in h5[key]], [i[1].encode('ascii') for i in h5[key]], [i[2] for i in h5[key]])
+        dataset.reportNoMask(no_mask)
 
     def stats(self):
         means = []
@@ -158,12 +159,11 @@ class dataset:
         val_imgs, val_labels, val_attrs = [], [], []
         test_imgs, test_labels, test_attrs = [], [], []
 
-        from random import shuffle
         x = [i for i in range(len(imgs))]
-        shuffle(x)
+        random.Random(19).shuffle(x)
 
         n_train = int(round(data_split[0] * len(imgs)))
-        n_val = int(round(data_split[1] * len(imgs)))
+        n_val = int(round((data_split[1] + data_split[0]) * len(imgs))) - n_train
         n_test = int(round(data_split[2] * len(imgs)))
 
         for i in x[:n_train]:
@@ -233,15 +233,21 @@ class dataset:
         dataset.attrs.create('Clipped_Pixel_Boundary', [attr['Clipped_Pixel_Boundary'] for attr in attrs])
         dataset.attrs.create('Echo_Time', [attr['Echo_Time'] for attr in attrs])
 
+    @classmethod
+    def reportNoMask(cls, list):
+        csv = pd.DataFrame(list, columns=['patient', 'Echo_Time'])
+        csv.to_csv('no_mask.csv')
+
+
 class patient:
 
-    def __init__(self, patientID, jsonpath, datapath=None, stepoutput=False, verbose=False):
+    def __init__(self, patientID, patient_data, datapath=None, stepoutput=False, verbose=False):
         self._patientID = patientID
-        self._jsonpath = jsonpath
+        self._patientdata = patient_data
         self._datapath = datapath
         self._stepoutput = stepoutput
         self._verbose = verbose
-        self.readJSON()
+        # self.readJSON()
         self.createData()
 
     def run(self):
@@ -258,7 +264,7 @@ class patient:
             stats += volume.run_stats()
         return stats
 
-    def readJSON(self):
+    def readJSON_legacy(self):
         path = self._jsonpath
         with open(path, 'r') as f:
             self._jsondata = json.load(f)[self._patientID]
@@ -267,54 +273,69 @@ class patient:
     def createData(self):
         #self._volumes = np.array([])
         self._volumes = []
-        tgzpath = os.path.join(self._datapath, os.path.basename(self._jsondata["filename"]))
-        if self._verbose: print('Entering tgz directory: ' + tgzpath)
-        if os.path.exists(tgzpath):
-            with tarfile.open(tgzpath) as f:
-                for i, fileset in enumerate(self._jsondata["data"]["FileList"]):
-                    # if (self._jsondata['data']['ImageType'][i] == 'PRIMARY_OTHER'):
-                    #if self._verbose: print('PRIMARY_OTHER type images found.')
-                    tmp = volume(os.path.splitext(os.path.basename(tgzpath))[0] + '-' + self._jsondata['data']['ImageType'][i], os.path.splitext(os.path.basename(tgzpath))[0], self._jsondata['data']['ImageType'][i],
-                                 stepoutput=self._stepoutput, weightpath=weight_path, verbose=self._verbose)
-                    tmp.compile(fileset, f)
-                    # if tmp.imgstats() > MEAN_THRESHOLD:
+        zips = sorted(list(filter(lambda x: '.tgz' in x, os.listdir(data_dir))))
+        tgzname = self._patientID.strip()
+        # tgzpath = os.path.join(self._datapath, os.path.basename(self._jsondata["filename"]))
+        # if os.path.exists(tgzpath):
+        for file in zips:
+            if tgzname + '.tgz' in file:
+                if self._verbose: print('Entering tgz directory: ' + file)
+                tgzpath = os.path.join(data_dir, file)
+                patient_name = os.path.splitext(os.path.basename(tgzpath))[0]
+                with tarfile.open(tgzpath) as f:
+                    # patient_data = self._jsondata[tgzname]
+                    for i, series in enumerate(self._patientdata):
+                        fileset = [x['fullpath'] for x in series['Files']]
+                        # if (self._jsondata['data']['ImageType'][i] == 'PRIMARY_OTHER'):
+                        #if self._verbose: print('PRIMARY_OTHER type images found.')
+                        if series['ImageType'] in [*image_types_T2, *image_types_secondary]:
+                            tmp = volume(patient_name + '-' + series['ImageType'], patient_name, series['ImageType'], series['category'],
+                                         stepoutput=self._stepoutput, weightpath=weight_path, verbose=self._verbose)
+                            tmp.compile(fileset, f)
+                            # if tmp.imgstats() > MEAN_THRESHOLD:
 
-                    #self._volumes = np.append(self._volumes, tmp)
-                    self._volumes.append(tmp)
-                    # else:
-                    #     if self._verbose: print(f'Non-T2 image removed.')
-                    # except NotImplementedError:
-                    #     print('Skipping compressed image, directory: ' + self._jsondata["data"]["Folder"][i])
-                # else:
-                #     if self._verbose: print('No PRIMARY_OTHER type images. Datatype: ' + self._jsondata['data']['ImageType'][i])
-                    # tmp = volume.getVolume(tmp)
-                    # tmp.run()
+                            #self._volumes = np.append(self._volumes, tmp)
+                            self._volumes.append(tmp)
+                            # else:
+                            #     if self._verbose: print(f'Non-T2 image removed.')
+                            # except NotImplementedError:
+                            #     print('Skipping compressed image, directory: ' + self._jsondata["data"]["Folder"][i])
+                        # else:
+                        #     if self._verbose: print('No PRIMARY_OTHER type images. Datatype: ' + self._jsondata['data']['ImageType'][i])
+                            # tmp = volume.getVolume(tmp)
+                            # tmp.run()
 
 class volume:
 
-    def __init__(self, volname, patient='', imagetype='', stepoutput=False, verbose=False, weightpath=weight_path):
+    model = None
+
+    def __init__(self, volname, patient='', imagetype='', category='', stepoutput=False, verbose=False, weightpath=weight_path):
         self._weightpath = weightpath
         self._volname = volname
         self._imagetype = imagetype
+        self._category = category
         self._stepoutput = stepoutput
         self._verbose = verbose
         self._patient = volname if patient == '' else patient
 
-    #
     # def __init__(self, filename, weightpath=r"results\weights-32.h5"):
     #     self._filename = filename
     #     self._weightpath = weightpath
     #     self._data = utils.LoadFile(self._filename,normalize='CLAHE')
 
     def run(self):
-        self.preprocess()
-        if self._imagetype == 'PRIMARY_OTHER':
+        if self._imagetype in image_types_T2:
+            self.preprocess()
             self.modelConfig()
             self.predict()
-            self.clip()
-            self.postprocess()
-        elif self._data.dtype == 'float64':
-            self._data = self._data.astype(np.float16)
+            if not self.isEmpty(self._mask):
+                self.clip()
+                self.resize(clip=True)
+            elif self._attr['Echo_Time'] > 100:
+                self.resize(clip=False)
+        if self._imagetype in image_types_secondary:
+            self.resize(clip=False)
+        self._data = self._data.astype(np.float16)
         # return self.output()
 
     def run_stats(self):
@@ -375,7 +396,7 @@ class volume:
     #     print('Volume saved. \n ----------')
 
     def compile(self, fileset, f):
-        if self._verbose: print('Compiling images...')
+        if self._verbose: print('Compiling images... ' + self._patient + '-' + self._imagetype)
         for x in fileset:
             f.extract(x, path='temp-unzip')
         folderpath, _ = os.path.split(fileset[0])
@@ -535,20 +556,8 @@ class volume:
     def getImageType(self):
         return self._imagetype
 
-    def getLabel(self):
-        AccessionID = self._patient.split('-')[1].lower()
-        if "n" in AccessionID:
-            label = 0
-        elif "c" in AccessionID:
-            label = 2
-        elif "wm" in AccessionID:
-            label = 2
-        elif "b" in AccessionID:
-            if AccessionID not in block_id:
-                label = 1
-            else:
-                label = 2
-        return label
+    def getCategory(self):
+        return self._category
 
     def imgStats(self):
         if self._verbose: print(f'{self._patient}-{self._imagetype}: mean: {np.mean(self._data):.5f}, median: {np.median(self._data):.5f}, std: {np.std(self._data):.5f}, max: {np.max(self._data):.5f}')
@@ -573,33 +582,34 @@ class volume:
         self._zeros = np.zeros(self._data.shape)
 
     def modelConfig(self):
-        h_pars = configuration.hyperparameters[configuration.select_model]
+        if volume.model is None:
+            h_pars = configuration.hyperparameters[configuration.select_model]
 
-        loader = model_storage.Model_Storage(input_shape=h_pars['input_shape'],
-                                             n_filter=h_pars['n_filter'],
-                                             number_of_class=h_pars['number_of_class'],
-                                             activation_last=h_pars['activation_last'],
-                                             metrics=h_pars['metrics'],
-                                             loss=h_pars['loss'],
-                                             optimizer=h_pars['optimizer']
-                                             )
-        if (configuration.parallel):
-            with tf.device('/cpu:0'):
+            loader = model_storage.Model_Storage(input_shape=h_pars['input_shape'],
+                                                 n_filter=h_pars['n_filter'],
+                                                 number_of_class=h_pars['number_of_class'],
+                                                 activation_last=h_pars['activation_last'],
+                                                 metrics=h_pars['metrics'],
+                                                 loss=h_pars['loss'],
+                                                 optimizer=h_pars['optimizer']
+                                                 )
+            if (configuration.parallel):
+                with tf.device('/cpu:0'):
+                    method_to_call = getattr(loader, configuration.select_model)  # 'CancerDetection_HarmonicSeries')
+                    volume.model = method_to_call()
+            else:
                 method_to_call = getattr(loader, configuration.select_model)  # 'CancerDetection_HarmonicSeries')
-                self._model = method_to_call()
-        else:
-            method_to_call = getattr(loader, configuration.select_model)  # 'CancerDetection_HarmonicSeries')
-            self._model = method_to_call()
-        # print(self._model.summary())
-        if configuration.parallel:
-            from keras.utils import multi_gpu_model
-            self._model = multi_gpu_model(self._model, gpus=configuration.number_of_gpus, cpu_relocation=False,
-                                          cpu_merge=True)
-            self._model = loader.Compile(self._model)
-        else:
-            # Compile the model.
-            self._model = loader.Compile(self._model)
-        self._model.load_weights(self._weightpath)
+                volume.model = method_to_call()
+            # print(volume.model.summary())
+            if configuration.parallel:
+                from keras.utils import multi_gpu_model
+                volume.model = multi_gpu_model(volume.model, gpus=configuration.number_of_gpus, cpu_relocation=False,
+                                              cpu_merge=True)
+                volume.model = loader.Compile(volume.model)
+            else:
+                # Compile the model.
+                volume.model = loader.Compile(volume.model)
+            volume.model.load_weights(self._weightpath)
 
     def predict(self):
         self.load()
@@ -607,7 +617,7 @@ class volume:
         predict_set = np.vstack((self._data, self._zeros))  # np.load(self._filename)
         self._data = self._data.reshape(configuration.standard_volume)
         predict_set = predict_set.reshape(*predict_set.shape, 1)
-        prelim = self._model.predict(predict_set)[-1]
+        prelim = volume.model.predict(predict_set)[-1]
         results = prelim[0]
         if self._verbose: print(results.shape)
         self._mask = utils.smooth_contours(utils.smooth_contours(results, type='CV2'))
@@ -618,6 +628,7 @@ class volume:
         # plt.show()
         if self.isEmpty(self._mask):
             self._clip = None
+            no_mask.append((self._patient, self._attr['Echo_Time']))
         else:
             self.findBorder(self._mask)
 
@@ -686,7 +697,7 @@ class volume:
 
             data = sitk.GetArrayFromImage(clipped)
             if data.size:
-                if self._verbose: print('Saving to .mhd file.')
+                # if self._verbose: print('Saving to .mhd file.')
                 # self.saveVolume(data, 'clipped', 'h5')
                 self.saveVolume(data, 'clipped', 'mhd')
             else:
@@ -697,17 +708,20 @@ class volume:
             self._sitk = clipped
             self._attr['Clipped_Pixel_Boundary'] = tuple(self._clip)
 
-    def postprocess(self):
-        if self._clip:
-            new_Spacing = [old_sz * old_spc / new_sz for old_sz, old_spc, new_sz in
-                           zip(self._sitk.GetSize(), self._sitk.GetSpacing(), output_size)]
-            output_sitk = sitk.Resample(self._sitk, output_size, sitk.Transform(),
-                                    sitk.sitkLanczosWindowedSinc, self._sitk.GetOrigin(), new_Spacing,
-                                    self._sitk.GetDirection(), 0.0, self._sitk.GetPixelIDValue())
-            self.setAttributes(output_sitk)
-            self._data = sitk.GetArrayFromImage(output_sitk)
-            # self.saveVolume(self._data, 'output', 'h5')
-            self.saveVolume(self._data, 'output', 'mhd')
+    def resize(self, clip):
+        if clip:
+            img = self._sitk
+        else:
+            img = self._orig
+        new_Spacing = [old_sz * old_spc / new_sz for old_sz, old_spc, new_sz in
+                       zip(img.GetSize(), img.GetSpacing(), output_size)]
+        output_sitk = sitk.Resample(img, output_size, sitk.Transform(),
+                                sitk.sitkLanczosWindowedSinc, img.GetOrigin(), new_Spacing,
+                                img.GetDirection(), 0.0, img.GetPixelIDValue())
+        self.setAttributes(output_sitk)
+        self._data = sitk.GetArrayFromImage(output_sitk)
+        # self.saveVolume(self._data, 'output', 'h5')
+        self.saveVolume(self._data, 'output', 'mhd')
 
     def output(self):
         return self
@@ -721,6 +735,7 @@ def argsparser():
     global data_dir
     global weight_path
     global data_split
+    global step_output
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -749,6 +764,12 @@ def argsparser():
         nargs = 3,
         help = 'split for training, validation, and test sets in decimal form'
     )
+    parser.add_argument(
+        '--step_output',
+        default = False,
+        action = 'store_true',
+        help = 'boolean to store intermediate image output in mhd format (e.g., original, preprocessed, mask)'
+    )
     args = parser.parse_args()
 
     output_dir = args.output_dir
@@ -756,10 +777,11 @@ def argsparser():
     data_dir = args.data_dir
     weight_path = args.weight_path
     data_split = args.data_split
+    step_output = args.step_output
 
 if __name__ == '__main__':
     argsparser()
-    data = dataset(jsonpath=json_filepath, datapath=data_dir)
+    data = dataset(jsonpath=json_filepath, datapath=data_dir, stepoutput=step_output)
     data.runPath()
     # data = volume('test')
     # data.compile_folder('temp-unzip/1.2.840.4267.32.316936701248529032407369277386144371677/1.2.840.4267.32.226789496748388476211964232698380117696')
