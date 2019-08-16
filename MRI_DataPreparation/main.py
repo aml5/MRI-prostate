@@ -143,8 +143,8 @@ class dataset:
         train_imgs, train_labels, train_attrs = [], [], []
         val_imgs, val_labels, val_attrs = [], [], []
         test_imgs, test_labels, test_attrs = [], [], []
-        rand = random.random()
         for i in range(len(imgs)):
+            rand = random.random()
             if rand < data_split[0]:
                 train_imgs.append(imgs[i])
                 train_labels.append(labels[i])
@@ -159,18 +159,19 @@ class dataset:
                 test_attrs.append(attrs[i])
         if len(train_imgs) > 0:
             train = h5.create_dataset('train_img', data=train_imgs)
-            dataset.saveAttrs(train)
+            dataset.saveAttrs(train, train_attrs)
             h5.create_dataset('train_labels', data=train_labels)
             # h5.create_dataset('train_attrs', data=train_attrs)
         if len(val_imgs) > 0:
             val = h5.create_dataset('val_img', data=val_imgs)
-            dataset.saveAttrs(val)
+            dataset.saveAttrs(val, val_attrs)
             h5.create_dataset('val_labels', data=val_labels)
             # h5.create_dataset('val_attrs', data=val_attrs)
         if len(test_imgs) > 0:
             test = h5.create_dataset('test_img', data=test_imgs)
-            dataset.saveAttrs(test)
+            dataset.saveAttrs(test, test_attrs)
             h5.create_dataset('test_labels', data=test_labels)
+
     @classmethod
     def saveAttrs(cls, dataset, attrs):
         dataset.attrs.create('Patient', [attr['Patient'].encode('ascii') for attr in attrs])
@@ -651,7 +652,7 @@ class volume:
             # sitkimg = sitk.GetImageFromArray(self._data)
             # sitk.WriteImage(sitkimg, 'data.mhd')
             self._sitk = clipped
-        self._attr['Clipped_Pixel_Boundary'] = tuple(self._clip)
+            self._attr['Clipped_Pixel_Boundary'] = tuple(self._clip)
 
     def postprocess(self):
         if self._clip:
