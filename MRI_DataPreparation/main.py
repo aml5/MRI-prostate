@@ -43,19 +43,21 @@ config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 set_session(tf.Session(config=config))
 
-output_dir = 'MRI_DataPreparation/output'
-json_filepath = 'MRI_DataPreparation/data/StudyCohort_prostate_mri_v4.json'
-data_dir = 'MRI_DataPreparation/MRI_cases_test'
+output_dir = 'Z:\Projects\MRI_Database'#'MRI_DataPreparation/' #'MRI_DataPreparation/output'
+json_filepath = './data/StudyCohort_prostate_mri_v4.json'
+data_dir = "Z:\MRI_PRAD\MRI_PRAD" #'MRI_DataPreparation/MRI_cases_test'
 weight_path = r"C:\Users\Andrew Lu\Documents\Projects\MRI_Prostate_Segmentation\results\result_Prostate_D3_Segmentation_20190705-1805\weights-32.h5"
 step_output = False
 output_size = [144,144,16]
 output_size_zyx = (output_size[2],output_size[1],output_size[0])
+to_store = (output_size[2],output_size[1],output_size[0],1)
 MEAN_THRESHOLD = 0.44
 data_split = [.7, .2, .1]
-image_types_T2 = ['T2_Ax', 'DIXON_INPHASE']
-image_types_secondary = ['ADC']
+image_types_T2 = ['T2_Ax', 'DIXON_INPHASE'] #Better if we change this to dictionary
+image_types_secondary = ['ADC'] #Better if we change this to dictionary
+database_name = ['T2_Ax', 'ADC']
 no_mask = []
-
+from h5Store import HDF5Store
 class dataset:
 
     def __init__(self,
@@ -65,6 +67,7 @@ class dataset:
         self._datapath = datapath
         self._jsonpath = jsonpath
         self._stepoutput = stepoutput
+        
 
     def run(self):
         h5 = {}
@@ -77,39 +80,62 @@ class dataset:
                     for vol in vols:
                         imagetype = vol.getImageType()
                         if imagetype not in h5:
+                            print(output_dir + '/' + imagetype + '.h5')
                             h5[imagetype] = h5py.File(output_dir + '/' + imagetype + '.h5', 'w')
                             h5[imagetype].create_group('images')
                             h5[imagetype].create_group('labels')
                         dataset.outputData(h5[imagetype], vol)
         for key, value in h5.items():
             value.close()
-
+      
     def runPath(self):
-        h5 = {}
         with open(self._jsonpath, 'r') as f:
             metafile = json.load(f)
+            #Calculate the existing image number for each image type
+            unique_list ={}
+            for key in metafile:
+                list_c = metafile[key]
+                for v in list_c:
+                    if 'ImageType' in v:
+                        if  v['ImageType'] not in unique_list:
+                            unique_list[v['ImageType']] = 0
+                        unique_list[v['ImageType']] +=1
+            print(unique_list)
+            #Generate DataAdapter for each image type 
+            h5_files = {}
+            for key in database_name:
+                h5_files[key] = HDF5Store(output_dir + '/' + key + '.h5', shape=to_store)
+            #Go through each patient and get the images that contain prostate
             for patientID, patient_data in metafile.items():
                 data = patient(patientID, patient_data, self._datapath, stepoutput=self._stepoutput, verbose=True)
                 vols = data.run()
                 if vols is not None:
+                    #h5 = {}
                     for vol in vols:
                         imagetype = vol.getImageType()
-                        if imagetype not in h5 and imagetype in [*image_types_T2, *image_types_secondary]:
-                            h5[imagetype] = []
-                            print(f'New h5[{imagetype}] ')
-                        if vol._attr['Image_Type'] in image_types_T2:
+                        #if imagetype not in h5 and imagetype in [*image_types_T2, *image_types_secondary]:
+                        #    #h5[imagetype] = []
+                        #print(f'New [{imagetype}] ')
+                        key=vol._attr['Image_Type']
+                        if key in image_types_T2:
+                            
                             if vol._data.shape == output_size_zyx:
-                                h5[imagetype].append((vol._data, vol.getCategory(), vol._attr))
-                                print(f'Add volume to h5[{imagetype}], shape:{vol._data.shape}, volume:{len(h5[imagetype])-1}')
+                                number_of_images =h5_files["T2_Ax"].append(vol.getCategory(),vol._data)
+                                #h5[imagetype].append((vol._data, vol.getCategory(), vol._attr))
+                                print(f'Add volume to h5[{imagetype}], shape:{vol._data.shape}, volume:{number_of_images}')
                             else:
                                 print(f'Skip adding volume to h5[{imagetype}], wrong shape {vol._data.shape}')
-                        elif vol._attr['Image_Type'] in image_types_secondary:
-                            h5[imagetype].append((vol._data, vol.getCategory(), vol._attr))
-                            print(f'Add volume to h5[{imagetype}], shape:{vol._data.shape}, volume:{len(h5[imagetype])-1}')
+                        elif key in image_types_secondary:
+                            number_of_images =h5_files[key].append(vol.getCategory(),vol._data)
+                            #h5[imagetype].append((vol._data, vol.getCategory(), vol._attr))
+                            print(f'Add volume to h5[{imagetype}], shape:{vol._data.shape}, volume:{number_of_images}')
                         # print('shape:',vol._data.shape)
                         #     h5[imagetype].append((vol._data, vol.getCategory(), vol._attr))
-        for key, value in h5.items():
-            dataset.outputDataPath(h5py.File(output_dir + '/' + key + '.h5','w'), [i[0] for i in h5[key]], [i[1].encode('ascii') for i in h5[key]], [i[2] for i in h5[key]])
+                        #Store the results into the h5f
+                        #for key in h5:
+                        #    img_data =h5[key]
+                        #    for img, category, _ in img_data:
+                        #        h5_files[key].append(category,img)
         dataset.reportNoMask(no_mask)
 
     def stats(self):
@@ -152,6 +178,17 @@ class dataset:
         pixeldata.attrs.create('Clipped_Pixel_Boundary', attrs['Clipped_Pixel_Boundary'])
         pixeldata.attrs.create('Echo_Time', attrs['Echo_Time'])
         label_group.create_dataset(attrs['Patient'], data=vol.getLabel())
+
+    @classmethod
+    def outputDataPath(cls, h5, imgs, labels, attrs,max_length):
+        if len(imgs) > 0:
+            if 'img' not in h5:
+                data = h5.create_dataset('img', data=imgs, maxshape=(max_length, +output_size_zyx,1))
+            else:
+                h5['img']
+                data.append()
+            #dataset.saveAttrs(imgs, attrs)
+            h5.create_dataset('labels', data=labels)
 
     @classmethod
     def outputDataPath(cls, h5, imgs, labels, attrs):
@@ -240,7 +277,6 @@ class dataset:
 
 
 class patient:
-
     def __init__(self, patientID, patient_data, datapath=None, stepoutput=False, verbose=False):
         self._patientID = patientID
         self._patientdata = patient_data
@@ -253,9 +289,12 @@ class patient:
     def run(self):
         volumes = []
         for volume in self._volumes:
-            volume.run()
-            # volume.stats_hist()
-            volumes.append(volume)
+            try:
+                volume.run()
+                # volume.stats_hist()
+                volumes.append(volume)
+            except:
+                print("can not generate volume file...")
         return volumes
 
     def run_stats(self):
@@ -282,28 +321,31 @@ class patient:
                 if self._verbose: print('Entering tgz directory: ' + file)
                 tgzpath = os.path.join(data_dir, file)
                 patient_name = os.path.splitext(os.path.basename(tgzpath))[0]
-                with tarfile.open(tgzpath) as f:
-                    # patient_data = self._jsondata[tgzname]
-                    for i, series in enumerate(self._patientdata):
-                        fileset = [x['fullpath'] for x in series['Files']]
-                        # if (self._jsondata['data']['ImageType'][i] == 'PRIMARY_OTHER'):
-                        #if self._verbose: print('PRIMARY_OTHER type images found.')
-                        if series['ImageType'] in [*image_types_T2, *image_types_secondary]:
-                            tmp = volume(patient_name + '-' + series['ImageType'], patient_name, series['ImageType'], series['category'],
-                                         stepoutput=self._stepoutput, weightpath=weight_path, verbose=self._verbose)
-                            tmp.compile(fileset, f)
-                            # if tmp.imgstats() > MEAN_THRESHOLD:
+                try:
+                    with tarfile.open(tgzpath) as f:
+                        # patient_data = self._jsondata[tgzname]
+                        for i, series in enumerate(self._patientdata):
+                            fileset = [x['fullpath'] for x in series['Files']]
+                            # if (self._jsondata['data']['ImageType'][i] == 'PRIMARY_OTHER'):
+                            #if self._verbose: print('PRIMARY_OTHER type images found.')
+                            if series['ImageType'] in [*image_types_T2, *image_types_secondary]:
+                                tmp = volume(patient_name + '-' + series['ImageType'], patient_name, series['ImageType'], series['category'],
+                                            stepoutput=self._stepoutput, weightpath=weight_path, verbose=self._verbose)
+                                tmp.compile(fileset, f)
+                                # if tmp.imgstats() > MEAN_THRESHOLD:
 
-                            #self._volumes = np.append(self._volumes, tmp)
-                            self._volumes.append(tmp)
+                                #self._volumes = np.append(self._volumes, tmp)
+                                self._volumes.append(tmp)
+                                # else:
+                                #     if self._verbose: print(f'Non-T2 image removed.')
+                                # except NotImplementedError:
+                                #     print('Skipping compressed image, directory: ' + self._jsondata["data"]["Folder"][i])
                             # else:
-                            #     if self._verbose: print(f'Non-T2 image removed.')
-                            # except NotImplementedError:
-                            #     print('Skipping compressed image, directory: ' + self._jsondata["data"]["Folder"][i])
-                        # else:
-                        #     if self._verbose: print('No PRIMARY_OTHER type images. Datatype: ' + self._jsondata['data']['ImageType'][i])
-                            # tmp = volume.getVolume(tmp)
-                            # tmp.run()
+                            #     if self._verbose: print('No PRIMARY_OTHER type images. Datatype: ' + self._jsondata['data']['ImageType'][i])
+                                # tmp = volume.getVolume(tmp)
+                                # tmp.run()
+                except:
+                    print("Cannot open the zipfile {tgzpath}, Escaping this file...")
 
 class volume:
 
@@ -501,7 +543,7 @@ class volume:
         ct_scan = ct_scan / np.max(ct_scan) # does not change result because max and min are 1.0 and 0.0 respectively
         # Sharpen
         # print(f'{self._patient}: mean: {np.mean(ct_scan):.5f}, median: {np.median(ct_scan):.5f}, std: {np.std(ct_scan):.5f}')
-        ct_scan = utils.Sharp3DVolume(ct_scan, type_of_sharpness=configuration.type_of_sharpness)
+        ct_scan = utils.Sharp3DVolume(ct_scan, False,type_of_sharpness=configuration.type_of_sharpness)
         # print(f'{self._patient}: mean: {np.mean(ct_scan):.5f}, median: {np.median(ct_scan):.5f}, std: {np.std(ct_scan):.5f}')
         # print(f'{self._patient}: mean: {np.mean(ct_scan):.5f}, median: {np.median(ct_scan):.5f}, std: {np.std(ct_scan):.5f}')
         img = sitk.GetImageFromArray(ct_scan)
