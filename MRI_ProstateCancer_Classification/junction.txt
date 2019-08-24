@@ -1,0 +1,2 @@
+Tensor("activation_2/Relu:0", shape=(?, 16, 144, 144, 12), dtype=float32, device=/device:CPU:0) Tensor("activation_6/Relu:0", shape=(?, 16, 144, 144, 12), dtype=float32, device=/device:CPU:0)
+Tensor("activation_4/Relu:0", shape=(?, 16, 72, 72, 18), dtype=float32, device=/device:CPU:0) Tensor("activation_8/Relu:0", shape=(?, 16, 72, 72, 18), dtype=float32, device=/device:CPU:0)
