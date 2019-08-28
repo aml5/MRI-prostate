@@ -1,10 +1,11 @@
+import sys, os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import SimpleITK as sitk
 import matplotlib.pyplot as plt
 from pylab import rcParams
 import numpy as np
 import matplotlib.gridspec as gridspec
 import cv2
-import sys, os
 import shutil
 sys.path.insert(0, 'MRI_Prostate_Segmentation')
 from os.path import isfile, join
@@ -36,6 +37,10 @@ import tarfile
 import h5py
 import pandas as pd
 import random
+import math
+import shutil
+from h5Store import HDF5Store
+
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
 os.environ["CUDA_VISIBLE_DEVICES"]= configuration.initial_gpu
 from keras.backend.tensorflow_backend import set_session
@@ -48,16 +53,18 @@ json_filepath = './data/StudyCohort_prostate_mri_v4.json'
 data_dir = "Z:\MRI_PRAD\MRI_PRAD" #'MRI_DataPreparation/MRI_cases_test'
 weight_path = r"C:\Users\Andrew Lu\Documents\Projects\MRI_Prostate_Segmentation\results\result_Prostate_D3_Segmentation_20190705-1805\weights-32.h5"
 step_output = False
-output_size = [144,144,16]
+keep_unzip = False
+output_size = (144,144,16)
 output_size_zyx = (output_size[2],output_size[1],output_size[0])
 to_store = (output_size[2],output_size[1],output_size[0],1)
 MEAN_THRESHOLD = 0.44
-data_split = [.7, .2, .1]
-image_types_T2 = ['T2_Ax', 'DIXON_INPHASE'] #Better if we change this to dictionary
-image_types_secondary = ['ADC'] #Better if we change this to dictionary
-database_name = ['T2_Ax', 'ADC']
+CLIP_MINIMUM=(50,50,7)  #zyx min
+data_split = (.7, .2, .1)
+image_types = {'T2': {'T2_Ax', 'DIXON_INPHASE'}, 'Secondary': {'ADC'}}
+database_name = {'T2_Ax': 0, 'ADC': 0}
 no_mask = []
-from h5Store import HDF5Store
+UNZIP_TEMP_DIR = 'temp-unzip'
+
 class dataset:
 
     def __init__(self,
@@ -103,39 +110,26 @@ class dataset:
             print(unique_list)
             #Generate DataAdapter for each image type 
             h5_files = {}
-            for key in database_name:
+            for key in database_name.keys():
                 h5_files[key] = HDF5Store(output_dir + '/' + key + '.h5', shape=to_store)
             #Go through each patient and get the images that contain prostate
             for patientID, patient_data in metafile.items():
                 data = patient(patientID, patient_data, self._datapath, stepoutput=self._stepoutput, verbose=True)
                 vols = data.run()
                 if vols is not None:
-                    #h5 = {}
+
                     for vol in vols:
                         imagetype = vol.getImageType()
-                        #if imagetype not in h5 and imagetype in [*image_types_T2, *image_types_secondary]:
-                        #    #h5[imagetype] = []
-                        #print(f'New [{imagetype}] ')
                         key=vol._attr['Image_Type']
-                        if key in image_types_T2:
-                            
+                        if key in image_types['T2']:
                             if vol._data.shape == output_size_zyx:
-                                number_of_images =h5_files["T2_Ax"].append(vol.getCategory(),vol._data)
-                                #h5[imagetype].append((vol._data, vol.getCategory(), vol._attr))
-                                print(f'Add volume to h5[{imagetype}], shape:{vol._data.shape}, volume:{number_of_images}')
+                                number_of_images =h5_files["T2_Ax"].append(vol.getCategory(),vol._data, json.dumps(vol._attr, sort_keys=True))
+                                print(f'Add volume to h5[T2_Ax], volume:{imagetype}-{number_of_images-1:04d}')
                             else:
-                                print(f'Skip adding volume to h5[{imagetype}], wrong shape {vol._data.shape}')
-                        elif key in image_types_secondary:
-                            number_of_images =h5_files[key].append(vol.getCategory(),vol._data)
-                            #h5[imagetype].append((vol._data, vol.getCategory(), vol._attr))
-                            print(f'Add volume to h5[{imagetype}], shape:{vol._data.shape}, volume:{number_of_images}')
-                        # print('shape:',vol._data.shape)
-                        #     h5[imagetype].append((vol._data, vol.getCategory(), vol._attr))
-                        #Store the results into the h5f
-                        #for key in h5:
-                        #    img_data =h5[key]
-                        #    for img, category, _ in img_data:
-                        #        h5_files[key].append(category,img)
+                                print(f'Skip adding volume to h5[T2_Ax], volume:{imagetype}- shape {vol._data.shape}')
+                        elif key in image_types['Secondary']:
+                            number_of_images =h5_files[key].append(vol.getCategory(),vol._data, json.dumps(vol._attr, sort_keys=True))
+                            print(f'Add volume to h5[{imagetype}], volume:{imagetype}-{number_of_images-1:04d}')
         dataset.reportNoMask(no_mask)
 
     def stats(self):
@@ -183,7 +177,7 @@ class dataset:
     def outputDataPath(cls, h5, imgs, labels, attrs,max_length):
         if len(imgs) > 0:
             if 'img' not in h5:
-                data = h5.create_dataset('img', data=imgs, maxshape=(max_length, +output_size_zyx,1))
+                data = h5.create_dataset('img', data=imgs, maxshape=(max_length, output_size_zyx,1))
             else:
                 h5['img']
                 data.append()
@@ -200,8 +194,8 @@ class dataset:
         random.Random(19).shuffle(x)
 
         n_train = int(round(data_split[0] * len(imgs)))
-        n_val = int(round((data_split[1] + data_split[0]) * len(imgs))) - n_train
-        n_test = int(round(data_split[2] * len(imgs)))
+        n_val = math.ceil((data_split[1] + data_split[0]) * len(imgs)) - n_train
+        n_test = math.ceil(data_split[2] * len(imgs))
 
         for i in x[:n_train]:
             train_imgs.append(imgs[i])
@@ -217,21 +211,6 @@ class dataset:
             test_imgs.append(imgs[i])
             test_labels.append(labels[i])
             test_attrs.append(attrs[i])
-
-        # for i in range(len(imgs)):
-        #     rand = random.random()
-        #     if rand < data_split[0]:
-        #         train_imgs.append(imgs[i])
-        #         train_labels.append(labels[i])
-        #         train_attrs.append(attrs[i])
-        #     elif rand < data_split[0] + data_split[1] and rand > data_split[0]:
-        #         val_imgs.append(imgs[i])
-        #         val_labels.append(labels[i])
-        #         val_attrs.append(attrs[i])
-        #     elif rand > 1 - data_split[2]:
-        #         test_imgs.append(imgs[i])
-        #         test_labels.append(labels[i])
-        #         test_attrs.append(attrs[i])
 
         if len(train_imgs) > 0:
             train = h5.create_dataset('train_img', data=train_imgs)
@@ -328,8 +307,9 @@ class patient:
                             fileset = [x['fullpath'] for x in series['Files']]
                             # if (self._jsondata['data']['ImageType'][i] == 'PRIMARY_OTHER'):
                             #if self._verbose: print('PRIMARY_OTHER type images found.')
-                            if series['ImageType'] in [*image_types_T2, *image_types_secondary]:
-                                tmp = volume(patient_name + '-' + series['ImageType'], patient_name, series['ImageType'], series['category'],
+                            imgtype = series['ImageType']
+                            if imgtype in image_types['T2'] | image_types['Secondary']:
+                                tmp = volume(patient_name + '-' + imgtype, patient_name, imgtype, series['category'],
                                             stepoutput=self._stepoutput, weightpath=weight_path, verbose=self._verbose)
                                 tmp.compile(fileset, f)
                                 # if tmp.imgstats() > MEAN_THRESHOLD:
@@ -360,23 +340,24 @@ class volume:
         self._verbose = verbose
         self._patient = volname if patient == '' else patient
 
-    # def __init__(self, filename, weightpath=r"results\weights-32.h5"):
-    #     self._filename = filename
-    #     self._weightpath = weightpath
-    #     self._data = utils.LoadFile(self._filename,normalize='CLAHE')
+        if imagetype in image_types['T2']:
+            self._id = database_name['T2_Ax']
+            database_name['T2_Ax'] += 1
+        elif imagetype in image_types['Secondary']:
+            self._id = database_name['ADC']
+            database_name['ADC'] += 1
 
     def run(self):
-        if self._imagetype in image_types_T2:
+        if self._imagetype in image_types['T2']:
             self.preprocess()
             self.modelConfig()
             self.predict()
-            if not self.isEmpty(self._mask):
-                self.clip()
-                self.resize(clip=True)
+            if self.clip():
+                self.resample(clip=True)
             elif self._attr['Echo_Time'] > 100:
-                self.resize(clip=False)
-        if self._imagetype in image_types_secondary:
-            self.resize(clip=False)
+                self.resample(clip=False)
+        if self._imagetype in image_types['Secondary']:
+            self.resample(clip=False)
         self._data = self._data.astype(np.float16)
         # return self.output()
 
@@ -399,7 +380,7 @@ class volume:
     def saveVolume(self, data, outputtype, filetype='h5'):
         if self._stepoutput:
             dir = os.path.join(output_dir, self._patient)
-            filename = self._volname + '-' + outputtype
+            filename = f'{self._volname}-{self._id:04d}-{outputtype}'
             if os.path.exists(dir):
                 pass
             else:
@@ -424,23 +405,11 @@ class volume:
                 text.write('Image is empty.')
                 text.close()
 
-    # @classmethod
-    # def saveVolumemhd(cls, data, volname, outputtype, Spacing=(1,1,1), Origin=(0,0,0)):
-    #     print('Saving to output/' + volname + '-' + outputtype + '.mhd...')
-    #     if os.path.exists('output'):
-    #         pass
-    #     else:
-    #         os.mkdir('output')
-    #     sitkimg = sitk.GetImageFromArray(data)
-    #     sitkimg.SetSpacing(Spacing)
-    #     sitkimg.SetOrigin(Origin)
-    #     sitk.WriteImage(sitkimg, 'output/' + volname + '-' + outputtype + '.mhd')
-    #     print('Volume saved. \n ----------')
 
     def compile(self, fileset, f):
         if self._verbose: print('Compiling images... ' + self._patient + '-' + self._imagetype)
         for x in fileset:
-            f.extract(x, path='temp-unzip')
+            f.extract(x, path=UNZIP_TEMP_DIR)
         folderpath, _ = os.path.split(fileset[0])
         self._orig, reader = self.loadVolume(os.path.join('temp-unzip', folderpath))
         size_array = self._orig.GetSize()
@@ -474,8 +443,16 @@ class volume:
         self._attr['Patient Path'] = os.path.join(self._patient, self._imagetype)
         self._attr['Clipped_Pixel_Boundary'] = (0, self._attr['Width'], 0, self._attr['Height'], 0, self._attr['Depth'])
         self._data = sitk.GetArrayFromImage(self._orig)
+        self._attr['Mean'] = float(np.mean(self._data))
+        self._attr['Max'] = float(np.max(self._data))
+        self._attr['Min'] = float(np.min(self._data))
+        self._attr['Stdev'] = float(np.std(self._data))
         # self.saveVolume(self._data, 'original', 'h5')
         self.saveVolume(self._data, 'original', 'mhd')
+
+        if not keep_unzip:
+            shutil.rmtree(UNZIP_TEMP_DIR)
+
 
     def compile_mhd(self, filename):
         img = sitk.ReadImage(filename)
@@ -523,10 +500,37 @@ class volume:
         files_filtered = [x[0] for x in files_filtered]
         return files_filtered
 
+    def trim(self, ct_scan, threshold):
+        # trim black edges
+        img = ct_scan[2]
+        flat = np.sum(img, axis=0)
+        left = 0
+        right = len(flat)
+        for i in range(len(flat)):
+            if flat[i] <= threshold:
+                left += 1
+            else:
+                break
+        for i in range(len(flat)):
+            if flat[len(flat)-i -1] <= threshold:
+                right -= 1
+            else:
+                break
+        if left != 0 or right != len(flat):
+            ct_scan = ct_scan[:,:,left:right]
+        return ct_scan
+
+
+
     def preprocess(self, normalize='CLAHE', verbose=False, apply_curve_smoothing=False):
         # Normalize
         ct_scan = self._data.astype(float)
         ct_scan /= np.max(ct_scan)
+        ct_scan *= 1000
+        ct_scan = ct_scan.astype(np.uint16)
+
+        #trim image black edges
+        ct_scan = self.trim(ct_scan, threshold=0.00001)
         # ct_scan = self.resize(ct_scan)
         if normalize=='CLAHE':
             ct_scan = utils.D3_equalize_adapthist(ct_scan, clip_limit=configuration.clip_limit, nbins=configuration.nbins)
@@ -663,7 +667,6 @@ class volume:
         results = prelim[0]
         if self._verbose: print(results.shape)
         self._mask = utils.smooth_contours(utils.smooth_contours(results, type='CV2'))
-        # self.saveVolume(mask, 'mask', 'h5')
         self.saveVolume(self._mask, 'mask', 'mhd')
         # utils.multi_slice_viewer_legacy(mask.reshape(configuration.standard_volume),
         #                                 self._data.reshape(configuration.standard_volume))
@@ -710,12 +713,15 @@ class volume:
         return flattened
 
     def clip(self):
-        if self._clip is not None:
+        if self._clip is None:
+            return False
+
+        x_len = self._clip[1] - self._clip[0]
+        y_len = self._clip[3] - self._clip[2]
+        z_len = self._clip[5] - self._clip[4]
+        if x_len >= CLIP_MINIMUM[0] and y_len >= CLIP_MINIMUM[1] and z_len >= CLIP_MINIMUM[2]:
             dim_orig = self._orig.GetSize()
             comp_factor = 0.05
-            x_len = self._clip[1] - self._clip[0]
-            y_len = self._clip[3] - self._clip[2]
-            z_len = self._clip[5] - self._clip[4]
             x_adj = np.ceil(x_len * comp_factor)
             y_adj = np.ceil(y_len * comp_factor)
             z_adj = 1 # np.ceil(z_len * comp_factor)
@@ -739,18 +745,21 @@ class volume:
 
             data = sitk.GetArrayFromImage(clipped)
             if data.size:
-                # if self._verbose: print('Saving to .mhd file.')
-                # self.saveVolume(data, 'clipped', 'h5')
                 self.saveVolume(data, 'clipped', 'mhd')
             else:
                 if self._verbose: print('No output file.')
                 self.saveVolume(data, 'clipped', 'txt')
-            # sitkimg = sitk.GetImageFromArray(self._data)
-            # sitk.WriteImage(sitkimg, 'data.mhd')
+
             self._sitk = clipped
             self._attr['Clipped_Pixel_Boundary'] = tuple(self._clip)
 
-    def resize(self, clip):
+            if self._verbose: print(f'clipping...{dim_orig} to ({x_len},{y_len},{z_len})')
+            return True
+        else:
+            if self._verbose: print(f'clipping...skipped. Too small ({x_len},{y_len},{z_len}) to clip.')
+            return False
+
+    def resample(self, clip):
         if clip:
             img = self._sitk
         else:
@@ -778,6 +787,7 @@ def argsparser():
     global weight_path
     global data_split
     global step_output
+    global keep_unzip
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -812,6 +822,12 @@ def argsparser():
         action = 'store_true',
         help = 'boolean to store intermediate image output in mhd format (e.g., original, preprocessed, mask)'
     )
+    parser.add_argument(
+        '--keep_unzip',
+        default = False,
+        action = 'store_true',
+        help = 'boolean to keep intermediate unzipped dicom files'
+    )
     args = parser.parse_args()
 
     output_dir = args.output_dir
@@ -820,18 +836,13 @@ def argsparser():
     weight_path = args.weight_path
     data_split = args.data_split
     step_output = args.step_output
+    keep_unzip = args.keep_unzip
 
 if __name__ == '__main__':
     argsparser()
     data = dataset(jsonpath=json_filepath, datapath=data_dir, stepoutput=step_output)
     data.runPath()
-    # data = volume('test')
-    # data.compile_folder('temp-unzip/1.2.840.4267.32.316936701248529032407369277386144371677/1.2.840.4267.32.226789496748388476211964232698380117696')
-    # data.run()
+
     print('Script complete. Exiting program now.')
-    # data = volume('case12', '', True)
-    # data.compile_mhd(r'MRI_Prostate_Segmentation/train/Case12.mhd')
-    # data.preprocess()
-    # # data.stats_hist()
-    # data.run()
+
     exit(0)
