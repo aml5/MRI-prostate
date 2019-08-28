@@ -40,16 +40,28 @@ class HDF5Store(object):
                 dtype=dtype,
                 compression=None,
                 chunks=(chunk_len, ))
+
+            dt = h5py.special_dtype(vlen=str)
+            self.attr = h5f.create_dataset(
+                'attr',
+                shape=(0,),
+                maxshape=(None,),
+                dtype=dt,
+                compression=None,
+                chunks=(chunk_len,))
+
     
-    def append(self, label_vle, img_vle):
+    def append(self, label_vle, img_vle, attr_vle):
         with h5py.File(self.datapath, mode='a') as h5f:
             img = h5f['img']
             img.resize((self.i + 1, ) + self.shape)
-            
             img[self.i] = [img_vle.reshape(self.shape)]
             label = h5f['label']
             label.resize((self.i + 1, ))
             label[self.i] = [self.label_definition[label_vle]]
+            attr = h5f['attr']
+            attr.resize((self.i + 1,))
+            attr[self.i] = [attr_vle]
             self.i += 1
             h5f.flush()
             return len(img)
