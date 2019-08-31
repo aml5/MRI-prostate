@@ -2,6 +2,7 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 import h5py
+import json
 
 LABELS=['NORM','iPCA','sPCA']
 
@@ -13,8 +14,12 @@ class h5viewer():
         newshape = tuple(list(img5d.shape)[0:4])
         self._img4d = np.reshape(img5d, newshape) # reshape from (8,16,144,144,1) to (8,16,144,144)
         self._labels = h5f[h5labelset][()]
-        self._attrs = h5f[h5attrset][()]
+        try:
+            self._attrs = h5f[h5attrset][()]
+        except:
+            self._attrs = None
         self._volnum = 0
+
 
     def view(self):
         self._volnum = 0
@@ -57,7 +62,10 @@ class h5viewer():
                     self.__next_volume(ax)
         fig.suptitle(f'Volume {self._volnum}, Slice {ax.index},  Label {LABELS[int(self._labels[self._volnum])]}')
         img = self._img4d[self._volnum]
-        fig.gca().set_xlabel(f'Mean:{np.mean(img):.2f}, Std:{np.std(img):.2f}, Max:{np.max(img)}')
+        if self._attrs is not None:
+            fig.gca().set_xlabel(f'Mean:{np.mean(img):.2f}, Std:{np.std(img):.2f}, Max:{np.max(img)}, Proc_Avg:{json.loads(self._attrs[self._volnum])["Proc_Mean"]:.2f}')
+        else:
+            fig.gca().set_xlabel(f'Mean:{np.mean(img):.2f}, Std:{np.std(img):.2f}, Max:{np.max(img)}')
         fig.canvas.draw()
 
     def _previous_slice(self, ax):

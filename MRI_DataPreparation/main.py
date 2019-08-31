@@ -447,6 +447,7 @@ class volume:
         self._attr['Max'] = float(np.max(self._data))
         self._attr['Min'] = float(np.min(self._data))
         self._attr['Stdev'] = float(np.std(self._data))
+        self._attr['Proc_Mean'] = float(np.mean(self._data))
         # self.saveVolume(self._data, 'original', 'h5')
         self.saveVolume(self._data, 'original', 'mhd')
 
@@ -588,6 +589,7 @@ class volume:
         # print(f'{self._patient}: mean: {np.mean(ct_scan):.5f}, median: {np.median(ct_scan):.5f}, std: {np.std(ct_scan):.5f}')
 
         self._data = ct_scan
+        self._attr['Proc_Mean'] = float(np.mean(self._data))
         # self.saveVolume(self._data, 'preprocessed', 'h5')
         self.saveVolume(self._data, 'preprocessed', 'mhd')
 
@@ -756,7 +758,9 @@ class volume:
             if self._verbose: print(f'clipping...{dim_orig} to ({x_len},{y_len},{z_len})')
             return True
         else:
-            if self._verbose: print(f'clipping...skipped. Too small ({x_len},{y_len},{z_len}) to clip.')
+            if self._verbose:
+                print(f'clipping...skipped. Too small ({x_len},{y_len},{z_len}) to clip.')
+                no_mask.append(self._patient, self._attr['EchoTime'])
             return False
 
     def resample(self, clip):
