@@ -54,14 +54,15 @@ data_dir = "Z:\MRI_PRAD\MRI_PRAD" #'MRI_DataPreparation/MRI_cases_test'
 weight_path = r"C:\Users\Andrew Lu\Documents\Projects\MRI_Prostate_Segmentation\results\result_Prostate_D3_Segmentation_20190705-1805\weights-32.h5"
 step_output = False
 keep_unzip = False
+only_one_entity=True
 output_size = (144,144,16)
 output_size_zyx = (output_size[2],output_size[1],output_size[0])
 to_store = (output_size[2],output_size[1],output_size[0],1)
 MEAN_THRESHOLD = 0.44
 CLIP_MINIMUM=(50,50,7)  #zyx min
 data_split = (.7, .2, .1)
-image_types = {'T2': {'T2_Ax', 'DIXON_INPHASE'}, 'Secondary': {'ADC'}}
-database_name = {'T2_Ax': 0, 'ADC': 0}
+image_types = {'DWI': ['DWI']}#{'T2': {'T2_Ax', 'DIXON_INPHASE'}, 'Secondary': {'ADC'}}
+database_name = {'DWI': 0}
 no_mask = []
 UNZIP_TEMP_DIR = 'temp-unzip'
 
@@ -121,7 +122,11 @@ class dataset:
                     for vol in vols:
                         imagetype = vol.getImageType()
                         key=vol._attr['Image_Type']
-                        if key in image_types['T2']:
+                        if only_one_entity:
+                            if key in image_types['DWI']:
+                                number_of_images =h5_files[key].append(vol.getCategory(),vol._data, json.dumps(vol._attr, sort_keys=True))
+                                print(f'Add volume to h5[{imagetype}], volume:{imagetype}-{number_of_images-1:04d}')
+                        elif key in image_types['T2']:
                             if vol._data.shape == output_size_zyx:
                                 number_of_images =h5_files["T2_Ax"].append(vol.getCategory(),vol._data, json.dumps(vol._attr, sort_keys=True))
                                 print(f'Add volume to h5[T2_Ax], volume:{imagetype}-{number_of_images-1:04d}')
@@ -270,7 +275,7 @@ class patient:
         for volume in self._volumes:
             try:
                 volume.run()
-                # volume.stats_hist()
+                #   volume.stats_hist()
                 volumes.append(volume)
             except:
                 print("can not generate volume file...")
@@ -295,6 +300,7 @@ class patient:
         tgzname = self._patientID.strip()
         # tgzpath = os.path.join(self._datapath, os.path.basename(self._jsondata["filename"]))
         # if os.path.exists(tgzpath):
+        boo_value = True
         for file in zips:
             if tgzname + '.tgz' in file:
                 if self._verbose: print('Entering tgz directory: ' + file)
@@ -308,7 +314,7 @@ class patient:
                             # if (self._jsondata['data']['ImageType'][i] == 'PRIMARY_OTHER'):
                             #if self._verbose: print('PRIMARY_OTHER type images found.')
                             imgtype = series['ImageType']
-                            if imgtype in image_types['T2'] | image_types['Secondary']:
+                            if imgtype in image_types['DWI']:# | image_types['Secondary']:
                                 tmp = volume(patient_name + '-' + imgtype, patient_name, imgtype, series['category'],
                                             stepoutput=self._stepoutput, weightpath=weight_path, verbose=self._verbose)
                                 tmp.compile(fileset, f)
@@ -340,15 +346,23 @@ class volume:
         self._verbose = verbose
         self._patient = volname if patient == '' else patient
 
+
+        if imagetype in image_types['DWI']:
+            self._id = database_name['DWI']
+            database_name['DWI'] += 1
+        '''
         if imagetype in image_types['T2']:
             self._id = database_name['T2_Ax']
             database_name['T2_Ax'] += 1
         elif imagetype in image_types['Secondary']:
             self._id = database_name['ADC']
             database_name['ADC'] += 1
+        '''
 
     def run(self):
-        if self._imagetype in image_types['T2']:
+        if self._imagetype in image_types['DWI']:
+             self.resample(clip=False)
+        elif self._imagetype in image_types['T2']:
             self.preprocess()
             self.modelConfig()
             self.predict()
@@ -356,7 +370,7 @@ class volume:
                 self.resample(clip=True)
             elif self._attr['Echo_Time'] > 100:
                 self.resample(clip=False)
-        if self._imagetype in image_types['Secondary']:
+        elif self._imagetype in image_types['Secondary']:
             self.resample(clip=False)
         self._data = self._data.astype(np.float16)
         # return self.output()
